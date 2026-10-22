@@ -4,17 +4,21 @@
 
 
 
+В версии 2.4.3-canary.4 устранена также проверка разрешённых доменов в LuCI. Регрессионный тест проверяет исходный и поставляемый JavaScript интерфейса.
+
 ## Установка одной командой
 
 Для установки на стабильном OpenWrt 25.12 с APK и архитектурой aarch64_cortex-a53 (включая Cudy WR3000U v1) выполните по SSH от root:
 
 ```sh
-wget -O /tmp/artak-install.sh https://github.com/Menshikovivan/ArtakFork/releases/download/2.4.3-canary.3/artak-install.sh && sh /tmp/artak-install.sh
+wget -O /tmp/artak-install.sh https://github.com/Menshikovivan/ArtakFork/releases/download/2.4.3-canary.4/artak-install.sh && sh /tmp/artak-install.sh
 ```
 
-Пакеты backend, LuCI и русской локализации скачиваются из [Releases этого репозитория](https://github.com/Menshikovivan/ArtakFork/releases/tag/2.4.3-canary.3). Установщик проверяет контрольные суммы SHA256 и сохраняет конфигурацию в `/root/artakfork-backups/`. Локальные APK устанавливаются с разрешением неподписанных пакетов через `apk add --allow-untrusted`.
+Пакеты backend, LuCI и русской локализации скачиваются из [Releases этого репозитория](https://github.com/Menshikovivan/ArtakFork/releases/tag/2.4.3-canary.4). Установщик проверяет контрольные суммы SHA256 и сохраняет конфигурацию в `/root/artakfork-backups/`. Локальные APK устанавливаются с разрешением неподписанных пакетов через `apk add --allow-untrusted`.
 
 Контрольные суммы охватывают также зеркальные bootstrap-пакеты. Их происхождение записано в `bootstrap-sources.json`, соответствующие исходники приложены к релизу. Новая сборка сверяет версии с upstream latest и останавливается, если версии установщика устарели.
+
+После обновления перезагрузите страницу LuCI с очисткой кэша браузера (Ctrl+F5), чтобы загрузить новый JavaScript.
 
 Для скачивания и проверки без установки: `sh /tmp/artak-install.sh --check`.
 
@@ -35,7 +39,7 @@ Workflow `Subscription CI` собирает закреплённую верси�
 IPK/APK собираются исходным `build.sh` на Linux с OpenWrt SDK. Сборка и публикация собственных релизов настроены в `.github/workflows/artak-release.yml`. Версия установщика должна совпадать с версией релиза. Пример:
 
 ```sh
-bash build.sh 2.4.3-canary.3 dist/ArtakFork
+bash build.sh 2.4.3-canary.4 dist/ArtakFork
 ```
 
 Для XHTTP требуется совместимый движок, например [forkop-x-engine](https://github.com/Screamshow/forkop-x-engine). Удаление фильтра подписок само по себе не добавляет XHTTP в штатный sing-box. Перед установкой необходимо проверить архитектуру и версию OpenWrt.

@@ -4238,6 +4238,10 @@ function validateSubscriptionUrlEntry(_section_id, value) {
     return parsed.message;
   }
 
+  if (/\s/.test(parsed.url)) {
+    return _("Invalid URL format");
+  }
+
   const validation = main.validateUrl(parsed.url);
   if (!validation.valid) {
     return validation.message;
@@ -4245,16 +4249,8 @@ function validateSubscriptionUrlEntry(_section_id, value) {
 
   try {
     const url = new URL(parsed.url);
-    const supportedHosts = new Set([
-      "aes2215.vs2112.51343.ru",
-      "sub.flintnet.pro",
-      "sub.hat.onl",
-    ]);
-    if (
-      url.protocol !== "https:" ||
-      !supportedHosts.has(url.hostname.toLowerCase())
-    ) {
-      return _("This subscription provider is not supported");
+    if (url.protocol !== "https:") {
+      return _("Subscription URL must use HTTPS");
     }
   } catch (_error) {
     return _("Invalid URL format");

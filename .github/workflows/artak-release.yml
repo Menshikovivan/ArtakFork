@@ -6,7 +6,7 @@ on:
       version:
         description: Package and release version
         required: true
-        default: 2.4.3-canary.3
+        default: 2.4.3-canary.4
         type: string
 
 permissions:
@@ -46,6 +46,7 @@ jobs:
 
       - name: Check standalone installer
         run: |
+          node tests/subscription_url_ui.cjs
           sh -n artak-install.sh
           sudo python3 -m unittest discover -s scripts/tests -p test_artak_installer.py
 
