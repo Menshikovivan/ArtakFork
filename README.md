@@ -6,17 +6,19 @@
 
 ## Установка одной командой
 
-Для обновления уже установленного Forkop на стабильном OpenWrt 25.12 с APK выполните по SSH от root:
+Для установки на стабильном OpenWrt 25.12 с APK и архитектурой aarch64_cortex-a53 (включая Cudy WR3000U v1) выполните по SSH от root:
 
 ```sh
-wget -O /tmp/artak-install.sh https://github.com/Menshikovivan/ArtakFork/releases/download/2.4.3-canary.2/artak-install.sh && sh /tmp/artak-install.sh
+wget -O /tmp/artak-install.sh https://github.com/Menshikovivan/ArtakFork/releases/download/2.4.3-canary.3/artak-install.sh && sh /tmp/artak-install.sh
 ```
 
-Пакеты backend, LuCI и русской локализации скачиваются из [Releases этого репозитория](https://github.com/Menshikovivan/ArtakFork/releases/tag/2.4.3-canary.2). Установщик проверяет контрольные суммы SHA256 и сохраняет конфигурацию в `/root/artakfork-backups/`. Самостоятельно собранные APK не подписаны, поэтому для этих трёх локальных файлов применяется `apk add --allow-untrusted`.
+Пакеты backend, LuCI и русской локализации скачиваются из [Releases этого репозитория](https://github.com/Menshikovivan/ArtakFork/releases/tag/2.4.3-canary.3). Установщик проверяет контрольные суммы SHA256 и сохраняет конфигурацию в `/root/artakfork-backups/`. Локальные APK устанавливаются с разрешением неподписанных пакетов через `apk add --allow-untrusted`.
+
+Контрольные суммы охватывают также зеркальные bootstrap-пакеты. Их происхождение записано в `bootstrap-sources.json`, соответствующие исходники приложены к релизу. Новая сборка сверяет версии с upstream latest и останавливается, если версии установщика устарели.
 
 Для скачивания и проверки без установки: `sh /tmp/artak-install.sh --check`.
 
-Установщик сохраняет имеющийся движок sing-box. Для XHTTP он должен поддерживать этот транспорт. Чистая установка, SNAPSHOT и OpenWrt с opkg этим установщиком не поддерживаются. Встроенная установка обновлений Forkop через старый интерфейс отключена: используйте установщик ArtakFork. Списки маршрутизации и отдельные компоненты сохраняют свои прежние источники.
+Установщик поддерживает чистую установку: устанавливает sing-box Extended и, если Forkop отсутствует, базовый Forkop, затем ArtakFork. Текущий релиз включает последние стабильные версии на момент сборки: Forkop 1.0.5 и sing-box Extended 1.14.3-extended-2.7.3. Уже установленный Extended этой версии повторно не устанавливается. SNAPSHOT, другие архитектуры и OpenWrt с opkg этим установщиком не поддерживаются. Системные зависимости загружаются из родных репозиториев OpenWrt; пакеты должны соответствовать установленному ядру. Конфликты с другими вариантами sing-box не обходятся принудительным удалением. Встроенная установка обновлений Forkop через старый интерфейс отключена: используйте установщик ArtakFork. Списки маршрутизации и отдельные компоненты сохраняют свои прежние источники.
 
 ## Проверка
 
@@ -33,7 +35,7 @@ Workflow `Subscription CI` собирает закреплённую верси�
 IPK/APK собираются исходным `build.sh` на Linux с OpenWrt SDK. Сборка и публикация собственных релизов настроены в `.github/workflows/artak-release.yml`. Версия установщика должна совпадать с версией релиза. Пример:
 
 ```sh
-bash build.sh 2.4.3-canary.2 dist/ArtakFork
+bash build.sh 2.4.3-canary.3 dist/ArtakFork
 ```
 
 Для XHTTP требуется совместимый движок, например [forkop-x-engine](https://github.com/Screamshow/forkop-x-engine). Удаление фильтра подписок само по себе не добавляет XHTTP в штатный sing-box. Перед установкой необходимо проверить архитектуру и версию OpenWrt.

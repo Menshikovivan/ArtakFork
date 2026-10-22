@@ -6,7 +6,7 @@ on:
       version:
         description: Package and release version
         required: true
-        default: 2.4.3-canary.2
+        default: 2.4.3-canary.3
         type: string
 
 permissions:
@@ -52,6 +52,11 @@ jobs:
       - name: Build six release packages
         run: bash build.sh "$VERSION" "$PWD/filtered-bin/artak-release"
 
+      - name: Discover latest pinned upstream releases and preserve verified assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/prepare_artak_bootstrap.py --output filtered-bin/artak-release
+
       - name: Prepare installer and package checksums
         shell: bash
         run: |
@@ -67,7 +72,11 @@ jobs:
               packages+=("$file")
             done
           done
-          sha256sum "${packages[@]}" > SHA256SUMS
+          bootstrap=(upstream-*.apk sing-box-extended_*.apk)
+          test "${#bootstrap[@]}" -eq 4
+          sources=(upstream-forkop-source.tar.gz sing-box-extended-source.tar.gz)
+          for file in "${bootstrap[@]}" "${sources[@]}"; do test -s "$file"; done
+          sha256sum "${packages[@]}" "${bootstrap[@]}" "${sources[@]}" > SHA256SUMS
           sha256sum -c SHA256SUMS
 
       - uses: actions/upload-artifact@v4.6.2
@@ -78,6 +87,8 @@ jobs:
             filtered-bin/artak-release/*.ipk
             filtered-bin/artak-release/SHA256SUMS
             filtered-bin/artak-release/artak-install.sh
+            filtered-bin/artak-release/bootstrap-sources.json
+            filtered-bin/artak-release/*-source.tar.gz
           retention-days: 30
           if-no-files-found: error
 
@@ -107,19 +118,15 @@ jobs:
           cat > "$RUNNER_TEMP/artak-release-notes.md" <<'EOF'
           ArtakFork is an independent source modification of Forkop X.
 
-          Changes: arbitrary HTTPS subscription providers are accepted; provider-specific subscription restrictions are removed. Existing XHTTP support uses the installed compatible engine.
+          Changes: arbitrary HTTPS subscription providers are accepted; provider-specific subscription restrictions are removed. The installer bootstraps the latest stable upstream Forkop and sing-box Extended versions pinned in its source, then installs ArtakFork.
 
-          This installer updates an existing Forkop installation only. Back up the router configuration before updating. The release contains the backend, LuCI interface and Russian translation in both IPK and APK formats, plus package SHA-256 checksums and artak-install.sh.
+          The one-command installer supports stable OpenWrt 25.12 APK on aarch64_cortex-a53. Back up the router configuration before updating. The release contains six ArtakFork packages, three byte-preserved upstream Forkop APKs and one native Extended APK, package/source SHA-256 checksums and artak-install.sh. bootstrap-sources.json records original names, URLs, GitHub asset digests and source commits. CI refuses publication if the pinned upstream versions are no longer latest stable.
+
+          Attribution and corresponding source: upstream Forkop by ushan0v (https://github.com/ushan0v/forkop, GPL-2.0-or-later); Forkop X by Screamshow (https://github.com/Screamshow/forkop-x, GPL-2.0-or-later); sing-box Extended by shtorm-7 and contributors, based on SagerNet sing-box (https://github.com/shtorm-7/sing-box-extended, GPL-3.0-or-later with the upstream naming condition). Original notices and licenses remain in the attached upstream-forkop-source.tar.gz and sing-box-extended-source.tar.gz archives. The ArtakFork source at this release tag supplies the modified backend and build scripts. No association with upstream authors is implied.
 
           Packages are distributed directly through this GitHub release, without a custom mirror. APK files are unsigned; the installer explicitly uses apk --allow-untrusted for these downloaded local packages. No APK signing key is supplied.
           EOF
-          assets=()
-          for package in forkop luci-app-forkop luci-i18n-forkop-ru; do
-            for format in apk ipk; do
-              assets+=("${package}_${VERSION}.${format}")
-            done
-          done
-          assets+=(SHA256SUMS artak-install.sh)
+          assets=(*.apk *.ipk *-source.tar.gz SHA256SUMS artak-install.sh bootstrap-sources.json)
           gh release create "$VERSION" "${assets[@]}" \
             --target "$RELEASE_COMMIT" \
             --prerelease \

@@ -9,7 +9,8 @@ import tempfile
 import unittest
 
 INSTALLER = Path(__file__).resolve().parents[2] / 'artak-install.sh'
-VERSION = '2.4.3-canary.2'
+VERSION = '2.4.3-canary.3'
+ENGINE = 'sing-box-extended_1.14.3-extended-2.7.3_openwrt_aarch64_cortex-a53.apk'
 PACKAGES = ['forkop', 'luci-app-forkop', 'luci-i18n-forkop-ru']
 SUPPORTED = sys.platform.startswith('linux') and hasattr(os, 'geteuid') and os.geteuid() == 0
 
@@ -31,27 +32,32 @@ class InstallerRuntime(unittest.TestCase):
             (self.root / 'bin' / name).symlink_to('busybox')
         shutil.copyfile(INSTALLER, self.root / 'installer.sh')
         self.release('25.12.6')
-        self.script('bin/apk', '''if [ "$1" = info ]; then [ ! -e /missing-forkop ]; exit $?; fi
+        self.script('bin/apk', '''if [ "$1" = info ]; then [ -e /has-forkop ]; exit $?; fi
+if [ "$1" = update ]; then echo update >> /events; exit 0; fi
+if [ "$1" = --simulate ]; then
+    echo "simulate:$*" >> /events
+    [ ! -e /simulate-fail ]; exit $?
+fi
 printf 'install:%s\\n' "$*" >> /events
-[ "$1" = add ] && [ "$2" = --allow-untrusted ] && [ "$#" = 5 ] || exit 90
+[ "$1" = add ] && [ "$2" = --allow-untrusted ] || exit 90
 shift 2
 for file in "$@"; do [ -f "$file" ] || exit 91; done
 ''')
-        self.script('bin/sing-box', 'exit 0\n')
+        self.script('bin/sing-box', 'echo "sing-box version 1.14.3-extended-2.7.3"\n')
+        self.script('etc/init.d/sing-box', 'echo "engine:$1" >> /events\n')
         self.script('bin/sysupgrade', '[ "$1" = -b ]\necho backup >> /events\necho mock-backup > "$2"\n')
-        self.script('etc/init.d/forkop', '[ "$1" = restart ]\necho restart >> /events\n')
+        self.script('etc/init.d/forkop', 'echo "forkop:$1" >> /events\n')
         self.script('bin/wget', '''[ "$1" = -O ]
 case "$3" in
-https://github.com/Menshikovivan/ArtakFork/releases/download/2.4.3-canary.2/*) ;;
+https://github.com/Menshikovivan/ArtakFork/releases/download/2.4.3-canary.3/*) ;;
 *) exit 95;;
 esac
 echo "download:${3##*/}" >> /events
 cp "/fixtures/${3##*/}" "$2"
 ''')
         hashes = []
-        for package in PACKAGES:
-            name = f'{package}_{VERSION}.apk'
-            data = f'offline dummy package: {package}\n'.encode()
+        for name in [ENGINE] + [f'{p}_{VERSION}.apk' for p in PACKAGES] + [f'upstream-{p}_1.0.5.apk' for p in PACKAGES]:
+            data = f'offline dummy package: {name}\n'.encode()
             (self.root / 'fixtures' / name).write_bytes(data)
             hashes.append(f'{hashlib.sha256(data).hexdigest()}  {name}\n')
         (self.root / 'fixtures/SHA256SUMS').write_text(''.join(hashes))
@@ -62,7 +68,7 @@ cp "/fixtures/${3##*/}" "$2"
         path.chmod(0o755)
 
     def release(self, version):
-        (self.root / 'etc/openwrt_release').write_text(f"DISTRIB_RELEASE='{version}'\n")
+        (self.root / 'etc/openwrt_release').write_text(f"DISTRIB_RELEASE='{version}'\nDISTRIB_ARCH='aarch64_cortex-a53'\n")
 
     def run_installer(self, *args):
         return subprocess.run(['chroot', str(self.root), '/bin/sh', '/installer.sh', *args],
@@ -74,26 +80,75 @@ cp "/fixtures/${3##*/}" "$2"
         return path.read_text().splitlines() if path.exists() else []
 
     def no_mutations(self):
-        self.assertFalse(any(e in ['backup', 'restart'] or e.startswith('install:') for e in self.events()))
+        self.assertFalse(any(e in ['backup', 'update'] or e.startswith(('install:', 'simulate:', 'engine:', 'forkop:')) for e in self.events()))
         self.assertFalse((self.root / 'root/artakfork-backups').exists())
 
     def test_check(self):
         result = self.run_installer('--check')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(len(self.events()), 4)
+        self.assertEqual(len(self.events()), 8)
         self.assertTrue(all(e.startswith('download:') for e in self.events()))
-        self.assertIn('all three APK checksums verified', result.stdout)
+        self.assertIn('all seven APK checksums verified', result.stdout)
         self.no_mutations()
 
-    def test_install(self):
+    def test_fresh_bootstrap(self):
+        (self.root / 'bin/sing-box').unlink()
         result = self.run_installer()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        expected = 'install:add --allow-untrusted ' + ' '.join(f'./{p}_{VERSION}.apk' for p in PACKAGES)
-        self.assertEqual(self.events()[4:], ['backup', expected, 'restart'])
+        events = self.events()[8:]
+        self.assertEqual(events[:2], ['backup', 'update'])
+        self.assertTrue(events[2].startswith('simulate:'))
+        self.assertTrue(events[3].startswith('simulate:'))
+        installs = [e for e in events if e.startswith('install:')]
+        self.assertEqual(len(installs), 3)
+        self.assertEqual(installs[0], 'install:add --allow-untrusted ./' + ENGINE)
+        self.assertIn('./upstream-forkop_1.0.5.apk', installs[1])
+        self.assertIn('./forkop_' + VERSION + '.apk', installs[2])
+        self.assertEqual(events[-1], 'forkop:restart')
+        self.assertIn('engine:disable', events)
         backups = list((self.root / 'root/artakfork-backups').glob('*.tar.gz'))
         self.assertEqual(len(backups), 1)
         self.assertGreater(backups[0].stat().st_size, 0)
         self.assertEqual(backups[0].stat().st_mode & 0o777, 0o600)
+
+    def test_existing_matching_engine_skips_base_and_engine(self):
+        (self.root / 'has-forkop').touch()
+        result = self.run_installer()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        events = self.events()[8:]
+        self.assertEqual(events[:2], ['backup', 'update'])
+        installs = [e for e in events if e.startswith('install:')]
+        expected = 'install:add --allow-untrusted ' + ' '.join(f'./{p}_{VERSION}.apk' for p in PACKAGES)
+        self.assertEqual(installs, [expected])
+        self.assertNotIn('forkop:stop', events)
+        self.assertNotIn('engine:stop', events)
+        self.assertIn('engine:disable', events)
+        self.assertEqual(events[-1], 'forkop:restart')
+
+    def test_missing_forkop_matching_engine_installs_base_and_own_only(self):
+        result = self.run_installer()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        events = self.events()[8:]
+        self.assertEqual(events[:2], ['backup', 'update'])
+        installs = [e for e in events if e.startswith('install:')]
+        expected_base = 'install:add --allow-untrusted ' + ' '.join(
+            f'./upstream-{p}_1.0.5.apk' for p in PACKAGES)
+        expected_own = 'install:add --allow-untrusted ' + ' '.join(
+            f'./{p}_{VERSION}.apk' for p in PACKAGES)
+        self.assertEqual(installs, [expected_base, expected_own])
+        self.assertNotIn('forkop:stop', events)
+        self.assertNotIn('engine:stop', events)
+        self.assertIn('engine:disable', events)
+        self.assertEqual(events[-1], 'forkop:restart')
+
+    def test_simulation_failure_leaves_services_and_packages_untouched(self):
+        (self.root / 'simulate-fail').touch()
+        result = self.run_installer()
+        self.assertNotEqual(result.returncode, 0)
+        events = self.events()[8:]
+        self.assertEqual(events[:2], ['backup', 'update'])
+        self.assertEqual(len([e for e in events if e.startswith('simulate:')]), 1)
+        self.assertFalse(any(e.startswith(('install:', 'forkop:', 'engine:')) for e in events))
 
     def test_corrupt_hash(self):
         (self.root / 'fixtures' / f'forkop_{VERSION}.apk').write_bytes(b'corrupted')
@@ -108,11 +163,10 @@ cp "/fixtures/${3##*/}" "$2"
         self.assertEqual(self.events(), [])
         self.no_mutations()
 
-    def test_missing_forkop(self):
-        (self.root / 'missing-forkop').touch()
-        result = self.run_installer()
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn('Install Forkop first', result.stderr)
+    def test_unsupported_architecture(self):
+        path = self.root / 'etc/openwrt_release'
+        path.write_text("DISTRIB_RELEASE='25.12.6'\nDISTRIB_ARCH='x86_64'\n")
+        self.assertNotEqual(self.run_installer().returncode, 0)
         self.assertEqual(self.events(), [])
         self.no_mutations()
 
