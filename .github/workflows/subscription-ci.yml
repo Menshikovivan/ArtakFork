@@ -1,0 +1,52 @@
+name: Subscription parser CI
+
+on:
+  push:
+    paths:
+      - 'forkop/files/usr/lib/**'
+      - 'tests/subscription_source_entry.uc'
+      - '.github/workflows/subscription-ci.yml'
+  pull_request:
+    paths:
+      - 'forkop/files/usr/lib/**'
+      - 'tests/subscription_source_entry.uc'
+      - '.github/workflows/subscription-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  subscription-source-entry:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      UCODE_COMMIT: 4a28662538275b67a0bcf11de25c365c1ec7a99d
+    steps:
+      - uses: actions/checkout@v5.0.0
+
+      - name: Install runtime build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libjson-c-dev pkg-config
+
+      - name: Build pinned ucode runtime and filesystem module
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone https://github.com/jow-/ucode.git "$RUNNER_TEMP/ucode-source"
+          git -C "$RUNNER_TEMP/ucode-source" checkout --detach "$UCODE_COMMIT"
+          test "$(git -C "$RUNNER_TEMP/ucode-source" rev-parse HEAD)" = "$UCODE_COMMIT"
+          cmake -S "$RUNNER_TEMP/ucode-source" -B "$RUNNER_TEMP/ucode-build" \
+            -DCMAKE_BUILD_TYPE=Release -DFS_SUPPORT=ON \
+            -DDIGEST_SUPPORT=OFF -DFFI_SUPPORT=OFF
+          cmake --build "$RUNNER_TEMP/ucode-build" --target ucode fs_lib --parallel 2
+
+      - name: Test arbitrary HTTPS subscription sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/ucode-build/ucode" \
+            -L "$RUNNER_TEMP/ucode-build/*.so" \
+            -L "$GITHUB_WORKSPACE/forkop/files/usr/lib/*.uc" \
+            tests/subscription_source_entry.uc
