@@ -1205,6 +1205,8 @@ function parse_forkop_release_catalog(response, ext) {
 }
 
 function forkop_release_catalog() {
+    if (FORKOP_RELEASE_REPO == "Menshikovivan/ArtakFork")
+        return [];
     return parse_forkop_release_catalog(http_get(FORKOP_MIRROR_BASE_URL + "/forkop/updates/releases.json"), is_apk() ? "apk" : "ipk");
 }
 
@@ -1224,6 +1226,10 @@ function selected_forkop_release(version) {
 }
 
 function latest_forkop_release_json() {
+    // ArtakFork packages are installed by artak-install.sh with SHA256 checks.
+    // Never offer packages from the inherited Forkop X mirror for this fork.
+    if (FORKOP_RELEASE_REPO == "Menshikovivan/ArtakFork")
+        return "";
     if (FORKOP_MIRROR_BASE_URL != "") {
         let response = http_get(FORKOP_MIRROR_BASE_URL + "/forkop/updates/" + forkop_update_channel() + ".json");
         if (response == "")
@@ -3066,6 +3072,8 @@ function save_forkop_configuration_backup(config_dir, backup_dir) {
 }
 
 function install_forkop(requested_version) {
+    if (FORKOP_RELEASE_REPO == "Menshikovivan/ArtakFork")
+        action_fail("forkop", "install", "Update ArtakFork using artak-install.sh from Menshikovivan/ArtakFork", FORKOP_VERSION, as_string(requested_version));
     requested_version = as_string(requested_version);
     let selected = requested_version != "" ? selected_forkop_release(requested_version) : null;
     if (requested_version != "" && selected == null)

@@ -1,0 +1,127 @@
+name: ArtakFork release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Package and release version
+        required: true
+        default: 2.4.3-canary.2
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: artak-release-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v5.0.0
+
+      - name: Validate version
+        run: |
+          bash build.sh --check-version "$VERSION"
+          test "$(sed -n 's/^VERSION=//p' artak-install.sh)" = "$VERSION"
+
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          # Match the upstream build environment and exclude the unrelated
+          # Chrome apt source, which can fail independently of this build.
+          for source in /etc/apt/sources.list.d/*; do
+            if [ -f "$source" ] && grep -q 'dl.google.com/linux/chrome' "$source"; then
+              sudo rm -f "$source"
+            fi
+          done
+          sudo apt-get update
+          sudo apt-get install -y build-essential busybox-static curl fakeroot file gawk git patch perl tar unzip util-linux xz-utils zstd
+
+      - name: Check standalone installer
+        run: |
+          sh -n artak-install.sh
+          sudo python3 -m unittest discover -s scripts/tests -p test_artak_installer.py
+
+      - name: Build six release packages
+        run: bash build.sh "$VERSION" "$PWD/filtered-bin/artak-release"
+
+      - name: Prepare installer and package checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_dir="$PWD/filtered-bin/artak-release"
+          cp artak-install.sh "$release_dir/artak-install.sh"
+          cd "$release_dir"
+          packages=()
+          for package in forkop luci-app-forkop luci-i18n-forkop-ru; do
+            for format in apk ipk; do
+              file="${package}_${VERSION}.${format}"
+              test -s "$file"
+              packages+=("$file")
+            done
+          done
+          sha256sum "${packages[@]}" > SHA256SUMS
+          sha256sum -c SHA256SUMS
+
+      - uses: actions/upload-artifact@v4.6.2
+        with:
+          name: artak-release-${{ inputs.version }}
+          path: |
+            filtered-bin/artak-release/*.apk
+            filtered-bin/artak-release/*.ipk
+            filtered-bin/artak-release/SHA256SUMS
+            filtered-bin/artak-release/artak-install.sh
+          retention-days: 30
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      VERSION: ${{ inputs.version }}
+      RELEASE_COMMIT: ${{ github.sha }}
+    steps:
+      - uses: actions/download-artifact@v4.3.0
+        with:
+          name: artak-release-${{ inputs.version }}
+          path: release
+
+      - name: Publish prerelease
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release
+          sha256sum -c SHA256SUMS
+          cat > "$RUNNER_TEMP/artak-release-notes.md" <<'EOF'
+          ArtakFork is an independent source modification of Forkop X.
+
+          Changes: arbitrary HTTPS subscription providers are accepted; provider-specific subscription restrictions are removed. Existing XHTTP support uses the installed compatible engine.
+
+          This installer updates an existing Forkop installation only. Back up the router configuration before updating. The release contains the backend, LuCI interface and Russian translation in both IPK and APK formats, plus package SHA-256 checksums and artak-install.sh.
+
+          Packages are distributed directly through this GitHub release, without a custom mirror. APK files are unsigned; the installer explicitly uses apk --allow-untrusted for these downloaded local packages. No APK signing key is supplied.
+          EOF
+          assets=()
+          for package in forkop luci-app-forkop luci-i18n-forkop-ru; do
+            for format in apk ipk; do
+              assets+=("${package}_${VERSION}.${format}")
+            done
+          done
+          assets+=(SHA256SUMS artak-install.sh)
+          gh release create "$VERSION" "${assets[@]}" \
+            --target "$RELEASE_COMMIT" \
+            --prerelease \
+            --title "ArtakFork $VERSION" \
+            --notes-file "$RUNNER_TEMP/artak-release-notes.md"
