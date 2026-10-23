@@ -12,7 +12,9 @@ for mode in community reference; do
     fi
     ucode -L "$LIB" "$LIB/singbox/generator.uc" generate-config-fixture \
         "$WORK/fixture.json" "$WORK/$mode.json" 127.0.0.1 0 1 '' 1.14.3-extended-2.7.3
-    ucode -L "$LIB" -e '
+    # A real script path is required: CLI/module guards use sourcepath(1),
+    # which is empty when a module is required directly from ucode -e.
+    cat >"$WORK/check.uc" <<'UCODE'
 let fs=require("fs"), catalog=require("singbox.rulesets");
 let config=json(fs.readfile(ARGV[0]));
 function expect(value,message){ if(!value) die(message+"\n"); }
@@ -41,6 +43,7 @@ for(let r in dns){
 }
 let direct=filter(config.route.rules,function(r){return contains(r.domain_suffix,"unrelated.example.test");});
 expect(length(direct)==1 && direct[0].outbound=="bypass-out","unrelated direct section changed");
-' "$WORK/$mode.json" "$mode"
+UCODE
+    ucode -L "$LIB" "$WORK/check.uc" "$WORK/$mode.json" "$mode"
 done
 echo 'Inline Google Gemini: five suffixes, Moscow routing, FakeIP DNS, source/port scope and unrelated bypass passed'
