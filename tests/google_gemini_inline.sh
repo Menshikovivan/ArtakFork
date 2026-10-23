@@ -8,7 +8,7 @@ cat >"$WORK/fixture.json" <<'JSON'
 JSON
 for mode in community reference; do
     if [ "$mode" = reference ]; then
-        ucode -e 'let fs=require("fs"); let f=json(fs.readfile(ARGV[0])); f.section[0].rule_sets=f.section[0].community_lists; delete f.section[0].community_lists; fs.writefile(ARGV[0],sprintf("%J",f));' "$WORK/fixture.json"
+        ucode -e 'let fs=require("fs"); let f=json(fs.readfile(ARGV[0])); f.section[0].rule_set=f.section[0].community_lists; delete f.section[0].community_lists; fs.writefile(ARGV[0],sprintf("%J",f));' "$WORK/fixture.json"
     fi
     ucode -L "$LIB" "$LIB/singbox/generator.uc" generate-config-fixture \
         "$WORK/fixture.json" "$WORK/$mode.json" 127.0.0.1 0 1 '' 1.14.3-extended-2.7.3
@@ -17,12 +17,12 @@ for mode in community reference; do
     cat >"$WORK/check.uc" <<'UCODE'
 let fs=require("fs"), catalog=require("singbox.rulesets");
 let config=json(fs.readfile(ARGV[0]));
-function expect(value,message){ if(!value) die(message+"\n"); }
+function expect(value,message){ if(!value) die(message+" (mode="+ARGV[1]+")\nGenerated fixture configuration: "+sprintf("%J",config)+"\n"); }
 function contains(value,needle){return type(value)=="array" ? index(value,needle)>=0 : value==needle;}
 expect(index(split(require("core.constants").COMMUNITY_SERVICES," "),"google_gemini")>=0,"Gemini not registered for configuration validation");
 let tag=ARGV[1]=="community" ? "moscow-google_gemini-community-ruleset" : "builtin-google_gemini-ruleset";
 let sets=filter(config.route.rule_set,function(s){return s.tag==tag;});
-expect(length(sets)==1,"inline Gemini ruleset missing or duplicated");
+expect(length(sets)==1,"inline Gemini ruleset missing or duplicated; expected tag "+tag);
 let set=sets[0];
 expect(set.type=="inline" && set.url==null && set.path==null,"Gemini unexpectedly requires remote or local files");
 let wanted=["gemini.google.com","aistudio.google.com","generativelanguage.google.com","alkalimining-pa.googleapis.com","proactivebackend-pa.googleapis.com"];
