@@ -30,9 +30,14 @@ jobs:
       - uses: actions/checkout@v5.0.0
 
       - name: Install runtime build dependencies
+        shell: bash
         run: |
+          set -euo pipefail
+          packages=(libjson-c-dev pkg-config)
+          if ! command -v cmake >/dev/null; then packages+=(cmake); fi
+          if ! command -v cc >/dev/null || ! command -v make >/dev/null; then packages+=(build-essential); fi
           sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
-          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y build-essential cmake libjson-c-dev pkg-config
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y "${packages[@]}"
 
       - name: Build pinned ucode runtime and filesystem module
         shell: bash
