@@ -62,6 +62,18 @@ function is_community(name) {
     return COMMUNITY_SERVICES[as_string(name)] === true;
 }
 
+function inline_community_rules(name) {
+    if (as_string(name) != "google_gemini")
+        return [];
+    return [{ domain_suffix: [
+        "gemini.google.com",
+        "aistudio.google.com",
+        "generativelanguage.google.com",
+        "alkalimining-pa.googleapis.com",
+        "proactivebackend-pa.googleapis.com"
+    ] }];
+}
+
 function community_url(name) {
     name = as_string(name);
     if (length(inline_community_rules(name)) > 0)
@@ -75,17 +87,6 @@ function community_url(name) {
     return SRS_MAIN_URL + "/" + name + ".srs";
 }
 
-function inline_community_rules(name) {
-    if (as_string(name) != "google_gemini")
-        return [];
-    return [{ domain_suffix: [
-        "gemini.google.com",
-        "aistudio.google.com",
-        "generativelanguage.google.com",
-        "alkalimining-pa.googleapis.com",
-        "proactivebackend-pa.googleapis.com"
-    ] }];
-}
 
 function community_kind(name) {
     name = as_string(name);
