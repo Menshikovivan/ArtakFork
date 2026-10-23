@@ -1029,8 +1029,12 @@ function commit_runtime_list_generation(signature) {
     let files = [];
     for (let path in fs.glob(TMP_RULESET_FOLDER + "/*")) {
         let name = substr(path, length(TMP_RULESET_FOLDER) + 1);
+        // This directory is shared with runtime community rulesets. Publish
+        // only files owned by the list generation, as restore/invalidation do.
+        if (!managed_list_ruleset_name(name))
+            continue;
         let target = stage + "/" + name;
-        if (generation_phase_failed("runtime-file-write") || !managed_list_ruleset_name(name) || !valid_list_ruleset_file(path) || !cache_copy_file(path, target)) {
+        if (generation_phase_failed("runtime-file-write") || !valid_list_ruleset_file(path) || !cache_copy_file(path, target)) {
             command_success_from_args([ "rm", "-rf", stage ]);
             return false;
         }

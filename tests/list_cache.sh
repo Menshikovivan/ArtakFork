@@ -238,6 +238,28 @@ quota_cmd() {
     ucode -L "$FORKOP_LIB" "$UPDATES_UC" "$@"
 }
 quota_cmd commit-runtime-list-generation || fail "a runtime generation was not committed"
+# The shared runtime directory can retain files owned by older releases or
+# another ruleset producer. They must not poison this managed generation.
+printf 'unrelated binary ruleset\n' >"$WORK_DIR/quota-runtime/community-discord.srs"
+printf '{"version":3,"rules":[]}\n' >"$WORK_DIR/quota-runtime/community-discord-ipv4.json"
+quota_cmd commit-runtime-list-generation || fail "unrelated runtime files rejected a managed generation"
+[ "$(cat "$WORK_DIR/quota-runtime/community-discord.srs")" = 'unrelated binary ruleset' ] ||
+  fail "generation publication changed an unrelated runtime file"
+[ -s "$WORK_DIR/quota-runtime/community-discord-ipv4.json" ] || fail "unrelated runtime JSON was removed"
+if grep -Eq 'community-discord' "$WORK_DIR/quota-generation/manifest.json"; then
+  fail "unrelated runtime files entered the managed generation manifest"
+fi
+[ ! -e "$WORK_DIR/quota-generation/community-discord.srs" ] || fail "unrelated binary entered generation"
+[ ! -e "$WORK_DIR/quota-generation/community-discord-ipv4.json" ] || fail "unrelated JSON entered generation"
+# Ownership filtering never excuses a malformed file which we do manage.
+managed_manifest_before="$(md5sum "$WORK_DIR/quota-generation/manifest.json" | cut -d' ' -f1)"
+printf '{broken\n' >"$WORK_DIR/quota-runtime/broken-lists-ruleset.json"
+if quota_cmd commit-runtime-list-generation; then
+  fail "malformed managed ruleset was accepted alongside unrelated files"
+fi
+[ "$managed_manifest_before" = "$(md5sum "$WORK_DIR/quota-generation/manifest.json" | cut -d' ' -f1)" ] ||
+  fail "malformed managed ruleset replaced the active generation"
+rm "$WORK_DIR/quota-runtime/broken-lists-ruleset.json"
 unchanged_generation_manifest="$(md5sum "$WORK_DIR/quota-generation/manifest.json" | cut -d' ' -f1)"
 quota_cmd commit-runtime-list-generation || fail "an identical runtime generation was rejected"
 [ "$unchanged_generation_manifest" = "$(md5sum "$WORK_DIR/quota-generation/manifest.json" | cut -d' ' -f1)" ] ||

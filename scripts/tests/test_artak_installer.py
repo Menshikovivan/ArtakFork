@@ -9,7 +9,7 @@ import tempfile
 import unittest
 
 INSTALLER = Path(__file__).resolve().parents[2] / 'artak-install.sh'
-VERSION = '2.4.3-canary.4'
+VERSION = '2.4.3-canary.5'
 ENGINE = 'sing-box-extended_1.14.3-extended-2.7.3_openwrt_aarch64_cortex-a53.apk'
 PACKAGES = ['forkop', 'luci-app-forkop', 'luci-i18n-forkop-ru']
 SUPPORTED = sys.platform.startswith('linux') and hasattr(os, 'geteuid') and os.geteuid() == 0
@@ -49,7 +49,7 @@ for file in "$@"; do [ -f "$file" ] || exit 91; done
         self.script('etc/init.d/forkop', 'echo "forkop:$1" >> /events\n')
         self.script('bin/wget', '''[ "$1" = -O ]
 case "$3" in
-https://github.com/Menshikovivan/ArtakFork/releases/download/2.4.3-canary.4/*) ;;
+https://github.com/Menshikovivan/ArtakFork/releases/download/2.4.3-canary.5/*) ;;
 *) exit 95;;
 esac
 echo "download:${3##*/}" >> /events

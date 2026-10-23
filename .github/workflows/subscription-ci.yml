@@ -5,11 +5,13 @@ on:
     paths:
       - 'forkop/files/usr/lib/**'
       - 'tests/subscription_source_entry.uc'
+      - 'tests/list_cache.sh'
       - '.github/workflows/subscription-ci.yml'
   pull_request:
     paths:
       - 'forkop/files/usr/lib/**'
       - 'tests/subscription_source_entry.uc'
+      - 'tests/list_cache.sh'
       - '.github/workflows/subscription-ci.yml'
   workflow_dispatch:
 
@@ -50,3 +52,18 @@ jobs:
             -L "$RUNNER_TEMP/ucode-build/*.so" \
             -L "$GITHUB_WORKSPACE/forkop/files/usr/lib/*.uc" \
             tests/subscription_source_entry.uc
+
+      - name: Test list cache ownership and transactional rollback
+        shell: bash
+        run: |
+          set -euo pipefail
+          export FORKOP_TEST_UCODE_BINARY="$RUNNER_TEMP/ucode-build/ucode"
+          export FORKOP_TEST_UCODE_MODULES="$RUNNER_TEMP/ucode-build"
+          mkdir -p "$RUNNER_TEMP/ucode-bin"
+          cat > "$RUNNER_TEMP/ucode-bin/ucode" <<'EOF'
+          #!/bin/sh
+          exec "$FORKOP_TEST_UCODE_BINARY" -L "$FORKOP_TEST_UCODE_MODULES/*.so" "$@"
+          EOF
+          chmod +x "$RUNNER_TEMP/ucode-bin/ucode"
+          export PATH="$RUNNER_TEMP/ucode-bin:$PATH"
+          bash tests/list_cache.sh
