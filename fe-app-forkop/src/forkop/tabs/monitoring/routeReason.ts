@@ -63,6 +63,7 @@ export function formatRouteReason(
           'ads_hagezi_pro',
           'google_play',
           'google_ai',
+          'google_gemini',
           'digitalocean',
           'cloudflare',
           'cloudfront',
@@ -88,6 +89,7 @@ export function formatRouteReason(
         const service = services.find((name) =>
           tag.endsWith(`-${name}-community-ruleset`),
         );
+        if (service === 'google_gemini') return 'Gemini / AI Studio';
         if (service)
           return service === 'google_ai'
             ? 'Google AI'

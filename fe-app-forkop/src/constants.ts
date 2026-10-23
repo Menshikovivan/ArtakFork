@@ -30,6 +30,7 @@ export const DOMAIN_LIST_OPTIONS = {
   telegram: 'Telegram',
   cloudflare: 'Cloudflare',
   google_ai: 'Google AI',
+  google_gemini: 'Gemini / AI Studio',
   google_play: 'Google Play',
   hodca: 'H.O.D.C.A',
   roblox: 'Roblox',

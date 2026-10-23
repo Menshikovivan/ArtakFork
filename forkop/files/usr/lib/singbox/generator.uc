@@ -364,6 +364,11 @@ function ensure_custom_ruleset(config, reference) {
         tag_name = "builtin-" + reference + "-ruleset";
         kind = runtime_rulesets.community_kind(reference);
         if (!ruleset_registered(config, tag_name)) {
+            let inline_rules = runtime_rulesets.inline_community_rules(reference);
+            if (length(inline_rules) > 0) {
+                push(config.route.rule_set, { type: "inline", tag: tag_name, rules: inline_rules });
+                return { tag: tag_name, kind };
+            }
             let rule_set = {
                 type: "remote",
                 tag: tag_name,
@@ -2490,6 +2495,11 @@ function ensure_community_ruleset(config, section_name, community) {
 
     let tag_name = ruleset_tag(section_name, community, "community");
     if (!ruleset_registered(config, tag_name)) {
+        let inline_rules = runtime_rulesets.inline_community_rules(community);
+        if (length(inline_rules) > 0) {
+            push(config.route.rule_set, { type: "inline", tag: tag_name, rules: inline_rules });
+            return { tag: tag_name, kind: runtime_rulesets.community_kind(community) };
+        }
         let rule_set = {
             type: "remote",
             tag: tag_name,

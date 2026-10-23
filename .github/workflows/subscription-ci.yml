@@ -6,12 +6,14 @@ on:
       - 'forkop/files/usr/lib/**'
       - 'tests/subscription_source_entry.uc'
       - 'tests/list_cache.sh'
+      - 'tests/google_gemini_inline.sh'
       - '.github/workflows/subscription-ci.yml'
   pull_request:
     paths:
       - 'forkop/files/usr/lib/**'
       - 'tests/subscription_source_entry.uc'
       - 'tests/list_cache.sh'
+      - 'tests/google_gemini_inline.sh'
       - '.github/workflows/subscription-ci.yml'
   workflow_dispatch:
 
@@ -67,3 +69,4 @@ jobs:
           chmod +x "$RUNNER_TEMP/ucode-bin/ucode"
           export PATH="$RUNNER_TEMP/ucode-bin:$PATH"
           bash tests/list_cache.sh
+          bash tests/google_gemini_inline.sh

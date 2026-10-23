@@ -2,6 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { formatRouteReason } from './routeReason';
 
 describe('route reason', () => {
+  it('labels the Gemini built-in list for sections with hyphenated names', () => {
+    expect(
+      formatRouteReason('rule_set=moscow-xhttp-google_gemini-community-ruleset => route(VPN-out)'),
+    ).toBe('Gemini / AI Studio');
+  });
   it('explains unconditional device routes with and without exclusions', () => {
     for (const conditions of [
       'inbound=[tproxy-in tproxy6-in] source_ip_cidr=192.168.90.201/32',

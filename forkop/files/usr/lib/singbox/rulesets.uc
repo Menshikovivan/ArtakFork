@@ -20,6 +20,7 @@ const COMMUNITY_SERVICES = {
     hdrezka: true,
     tiktok: true,
     google_ai: true,
+    google_gemini: true,
     google_play: true,
     hodca: true,
     discord: true,
@@ -63,6 +64,8 @@ function is_community(name) {
 
 function community_url(name) {
     name = as_string(name);
+    if (length(inline_community_rules(name)) > 0)
+        return "";
     if (name == "ads_hagezi_pro")
         return SRS_ADS_HAGEZI_PRO_URL;
     if (name == "supercell")
@@ -70,6 +73,18 @@ function community_url(name) {
     if (name == "github")
         return SRS_GITHUB_URL;
     return SRS_MAIN_URL + "/" + name + ".srs";
+}
+
+function inline_community_rules(name) {
+    if (as_string(name) != "google_gemini")
+        return [];
+    return [{ domain_suffix: [
+        "gemini.google.com",
+        "aistudio.google.com",
+        "generativelanguage.google.com",
+        "alkalimining-pa.googleapis.com",
+        "proactivebackend-pa.googleapis.com"
+    ] }];
 }
 
 function community_kind(name) {
@@ -138,6 +153,7 @@ function module_exports() {
         is_community,
         community_kind,
         community_url,
+        inline_community_rules,
         hash12,
         file_extension,
         kind_from_reference_hint,
