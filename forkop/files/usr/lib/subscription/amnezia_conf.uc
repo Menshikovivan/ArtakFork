@@ -17,6 +17,14 @@ const interface_keys = {
 const peer_keys = { publickey: "public_key", presharedkey: "preshared_key", allowedips: "allowed_ips", endpoint: "endpoint", persistentkeepalive: "persistent_keepalive" };
 
 function failure(message) { return { ok: false, error: message }; }
+function has_control(value, allow_whitespace) {
+    for (let i = 0; i < length(value); i++) {
+        let code = ord(substr(value, i, 1));
+        if ((code < 32 || code == 127) && !(allow_whitespace && (code == 9 || code == 10 || code == 13)))
+            return true;
+    }
+    return false;
+}
 function key_valid(v) { return type(v) == "string" && match(v, /^[A-Za-z0-9+\/]{43}=$/) != null; }
 function numbers(v, max, allow_range) {
     if (type(v) != "string" || match(v, allow_range ? /^[0-9]+(-[0-9]+)?$/ : /^[0-9]+$/) == null) return false;
@@ -35,7 +43,7 @@ function list_ip(v) {
 }
 
 function parse_conf(text) {
-    if (type(text) != "string" || length(text) > 262144 || index(text, "\x00") >= 0)
+    if (type(text) != "string" || length(text) > 262144 || has_control(text, true))
         return failure("Invalid configuration input");
     let iface = {}, peers = [], current = null, section = "", have_interface = false;
     for (let raw in split(text, "\n")) {
@@ -56,7 +64,7 @@ function parse_conf(text) {
         let name = lc(trim(substr(line, 0, equal))), value = trim(substr(line, equal + 1));
         let field = section == "interface" ? interface_keys[name] : peer_keys[name];
         if (field == null) return failure("Unsupported configuration field");
-        if (value == "" || current[field] != null || match(value, /[\x00-\x1f\x7f]/)) return failure("Empty or duplicate configuration field");
+        if (value == "" || current[field] != null || has_control(value, false)) return failure("Empty or duplicate configuration field");
         current[field] = value;
     }
     if (!have_interface || !key_valid(iface.private_key) || iface.addresses == null || length(peers) == 0)

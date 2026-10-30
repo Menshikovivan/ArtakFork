@@ -18,10 +18,10 @@ function safe_value(value) {
     if (type(value) == 'array') {
         if (!length(value)) return false;
         for (let item in value)
-            if (type(item) != 'string' || item == '' || match(item, /[\r\n\x00]/)) return false;
+            if (type(item) != 'string' || item == '' || match(item, /[\r\n]/) || index(item, "\x00") >= 0) return false;
         return true;
     }
-    return type(value) == 'string' && value != '' && !match(value, /[\r\n\x00]/);
+    return type(value) == 'string' && value != '' && !match(value, /[\r\n]/) && index(value, "\x00") < 0;
 }
 
 function copy_fields(source, fields) {
