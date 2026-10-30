@@ -8,6 +8,15 @@ export ARTAK_AWG_JOB_TEST_DIR="$WORK/job" ARTAK_TEST_ROOT="$ROOT"
 export ARTAK_TEST_BIN="$WORK/bin"
 mkdir -p "$WORK/bin" "$ARTAK_TEST_PREFIX/libexec/rpcd"
 cleanup() {
+    code=$?
+    if [ "$code" -ne 0 ]; then
+        echo '--- rpcd log ---' >&2
+        cat "$WORK/rpcd.log" >&2 2>/dev/null || true
+        echo '--- ubusd log ---' >&2
+        cat "$WORK/ubusd.log" >&2 2>/dev/null || true
+        echo '--- plugin signature and stderr ---' >&2
+        cat "$WORK/plugin-list.json" "$WORK/plugin-list.err" >&2 2>/dev/null || true
+    fi
     [ -z "${RPCD_PID:-}" ] || kill "$RPCD_PID" 2>/dev/null || true
     [ -z "${UBUSD_PID:-}" ] || kill "$UBUSD_PID" 2>/dev/null || true
     rm -rf "$WORK"
@@ -28,6 +37,12 @@ exit 1
 EOF
 chmod 755 "$WORK/bin/ucode"
 export PATH="$WORK/bin:$ARTAK_TEST_PREFIX/bin:$PATH"
+"$ARTAK_TEST_PREFIX/libexec/rpcd/luci.artak_awg" list >"$WORK/plugin-list.json" 2>"$WORK/plugin-list.err"
+python3 - "$WORK/plugin-list.json" <<'PY'
+import json, sys
+result = json.load(open(sys.argv[1]))
+assert 'preflight' in result and 'import_conf' in result and 'import_status' in result
+PY
 "$ARTAK_TEST_PREFIX/sbin/ubusd" -s "$WORK/ubus.sock" >"$WORK/ubusd.log" 2>&1 & UBUSD_PID=$!
 for i in 1 2 3 4 5; do [ -S "$WORK/ubus.sock" ] && break; sleep 1; done
 [ -S "$WORK/ubus.sock" ]
@@ -36,6 +51,7 @@ for i in 1 2 3 4 5; do
     if "$ARTAK_TEST_PREFIX/bin/ubus" -s "$WORK/ubus.sock" list luci.artak_awg | grep -q luci.artak_awg; then break; fi
     sleep 1
 done
+"$ARTAK_TEST_PREFIX/bin/ubus" -s "$WORK/ubus.sock" list luci.artak_awg >/dev/null
 python3 - "$WORK/request.json" <<'PY'
 import json, sys
 key = 'A' * 43 + '='
