@@ -1,0 +1,61 @@
+#!/bin/sh
+# Only for the disposable VM provisioned by amnezia_openwrt_vm.py.
+set -eu
+umask 077
+[ "${ARTAK_DISPOSABLE_VM:-}" = 1 ] && [ -n "${ARTAK_MIRROR:-}" ] || exit 1
+echo 'E2E stage: install built packages'
+/etc/init.d/firewall stop
+for package in forkop luci-app-forkop; do
+    wget -q -O "/tmp/$package.apk" "$ARTAK_MIRROR/artak/${package}_2.4.3-canary.7.apk"
+done
+apk --allow-untrusted --simulate add /tmp/forkop.apk /tmp/luci-app-forkop.apk >/dev/null
+apk --allow-untrusted add /tmp/forkop.apk /tmp/luci-app-forkop.apk >/dev/null
+apk add sing-box >/dev/null
+/etc/init.d/rpcd restart
+
+echo 'E2E stage: create disposable local peer'
+awg genkey >/tmp/e2e-client.key
+awg pubkey </tmp/e2e-client.key >/tmp/e2e-client.pub
+awg genkey >/tmp/e2e-peer.key
+awg pubkey </tmp/e2e-peer.key >/tmp/e2e-peer.pub
+ip link add e2epeer type amneziawg
+awg set e2epeer private-key /tmp/e2e-peer.key listen-port 29002 peer "$(cat /tmp/e2e-client.pub)" allowed-ips 10.88.1.1/32 endpoint 127.0.0.1:29001 persistent-keepalive 2
+ip netns add artak-e2e
+ip link set e2epeer netns artak-e2e
+ip -n artak-e2e link set lo up
+ip -n artak-e2e addr add 10.88.1.2/32 dev e2epeer
+ip -n artak-e2e link set e2epeer up
+ip -n artak-e2e route add 10.88.1.1/32 dev e2epeer
+uci set forkop.settings.awg_experimental=1
+uci set forkop.e2etest=section
+uci set forkop.e2etest.enabled=1
+uci set forkop.e2etest.action=connection
+uci add_list forkop.e2etest.fully_routed_ips=192.0.2.99
+uci commit forkop
+printf '[Interface]\nPrivateKey = %s\nAddress = 10.88.1.1/32\nListenPort = 29001\n[Peer]\nPublicKey = %s\nEndpoint = 127.0.0.1:29002\nAllowedIPs = 0.0.0.0/0\nPersistentKeepalive = 2\n' "$(cat /tmp/e2e-client.key)" "$(cat /tmp/e2e-peer.pub)" >/tmp/e2e.conf
+ucode -e 'let f=require("fs");let c=f.readfile("/tmp/e2e.conf");if(f.writefile("/tmp/e2e-request",sprintf("%J",{config:c,section:"e2etest"}))==null)exit(1);'
+
+echo 'E2E stage: invoke actual rpcd import'
+ubus call luci.artak_awg import_conf "$(cat /tmp/e2e-request)" >/tmp/e2e-result
+test "$(jsonfilter -i /tmp/e2e-result -e '@.ok')" = true
+count=0
+while :; do
+    ubus call luci.artak_awg import_status '{}' >/tmp/e2e-status
+    state=$(jsonfilter -i /tmp/e2e-status -e '@.state')
+    [ "$state" != running ] && break
+    count=$((count+1)); [ "$count" -lt 120 ] || { echo 'import timed out' >&2; exit 1; }
+    sleep 1
+done
+test "$state" = done || { echo "import failed: $state" >&2; exit 1; }
+iface=$(jsonfilter -i /tmp/e2e-status -e '@.name')
+case "$iface" in afawg_*) ;; *) echo 'invalid interface name' >&2; exit 1;; esac
+awg show "$iface" latest-handshakes | awk 'NR==1 && $2>0 {ok=1} END {exit !ok}'
+ip netns exec artak-e2e ping -c 3 -W 3 10.88.1.1 >/dev/null
+
+echo 'E2E stage: apply Forkop lifecycle and verify guard/config'
+/etc/init.d/firewall start
+/etc/init.d/forkop restart
+test -s /etc/sing-box/config.json
+ucode -e 'let f=require("fs");let c=json(f.readfile("/etc/sing-box/config.json"));let n=ARGV[0];if(!filter(c.outbounds||[],x=>x.bind_interface==n && x.routing_mark!=null)[0])exit(1);' "$iface"
+nft list table inet ForkopTable | grep -Fq "$iface"
+echo ARTAK_E2E_PASSED

@@ -2,6 +2,7 @@
 """Run the netifd/kernel test in a disposable OpenWrt x86 VM via serial."""
 import base64
 import http.server
+import os
 import pathlib
 import re
 import subprocess
@@ -23,6 +24,17 @@ class Mirror(http.server.BaseHTTPRequestHandler):
             url = 'https://downloads.openwrt.org' + path[len('/openwrt'):]
         elif re.fullmatch(r'/2grey/[A-Za-z0-9_.-]+\.apk', path):
             url = 'https://github.com/2Grey/awg-openwrt/releases/download/v25.12.6/' + path.rsplit('/', 1)[1]
+        elif re.fullmatch(r'/artak/(forkop|luci-app-forkop)_2\.4\.3-canary\.7\.apk', path) and os.getenv('ARTAK_E2E_PACKAGES'):
+            package = pathlib.Path(os.environ['ARTAK_E2E_PACKAGES']) / path.rsplit('/', 1)[1]
+            try:
+                data = package.read_bytes()
+                self.send_response(200)
+                self.send_header('Content-Length', str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+            except OSError:
+                self.send_error(404)
+            return
         else:
             self.send_error(404)
             return
@@ -86,6 +98,12 @@ def main():
         command(vm, '/etc/init.d/firewall start', timeout=120)
         command(vm, 'ARTAK_DISPOSABLE_VM=1 sh /tmp/artak-fw4.sh', timeout=120)
         print('OpenWrt VM: stock firewall reload retained the independent test guard')
+        if os.getenv('ARTAK_E2E_PACKAGES'):
+            upload('amnezia_artak_e2e_guest.sh', '/tmp/artak-e2e.sh')
+            command(vm, f'ARTAK_MIRROR=http://10.0.2.2:{mirror.server_port} ARTAK_DISPOSABLE_VM=1 sh /tmp/artak-e2e.sh', timeout=600)
+            if 'ARTAK_E2E_PASSED' not in vm.before:
+                raise RuntimeError('ArtakFork end-to-end test did not reach its success marker')
+            print('OpenWrt VM: ArtakFork AWG end-to-end passed')
     except Exception:
         # Guest script uses generated throwaway keys and never prints them.
         print('OpenWrt guest serial tail:', str(vm.before)[-5000:], file=sys.stderr)

@@ -1,0 +1,42 @@
+name: ArtakFork AWG OpenWrt end-to-end
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  openwrt-kmod:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5.0.0
+      - name: Build current release packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^VERSION=//p' artak-install.sh)
+          test "$version" = 2.4.3-canary.7
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          sudo apt-get update
+          sudo apt-get install -y build-essential busybox-static curl fakeroot file gawk git patch perl tar unzip util-linux xz-utils zstd
+          bash build.sh "$version" "$RUNNER_TEMP/artak-e2e-packages"
+          test -s "$RUNNER_TEMP/artak-e2e-packages/forkop_${version}.apk"
+          test -s "$RUNNER_TEMP/artak-e2e-packages/luci-app-forkop_${version}.apk"
+      - name: Install QEMU and serial harness
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 python3-pexpect
+      - name: Download and verify official OpenWrt image
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 -o "$RUNNER_TEMP/openwrt.img.gz" 'https://downloads.openwrt.org/releases/25.12.6/targets/x86/64/openwrt-25.12.6-x86-64-generic-ext4-combined.img.gz'
+          echo 'f8538784d0288b4133a99ac2a68443e4922ffde6343e80df56a5882364b9d499  '"$RUNNER_TEMP/openwrt.img.gz" | sha256sum -c
+          gzip -dc "$RUNNER_TEMP/openwrt.img.gz" > "$RUNNER_TEMP/openwrt.img"
+      - name: Test real OpenWrt netifd and kmod peers
+        env:
+          ARTAK_E2E_PACKAGES: ${{ runner.temp }}/artak-e2e-packages
+        run: /usr/bin/python3 tests/amnezia_openwrt_vm.py "$RUNNER_TEMP/openwrt.img"
