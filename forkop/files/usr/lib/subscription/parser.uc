@@ -3184,9 +3184,19 @@ function parse_subscription_source_entry_tsv(entry) {
     return write_subscription_source_entry_tsv_result(parse_subscription_source_entry(entry));
 }
 
+// For internal callers only: returned profiles contain private keys. Never
+// serialize this result to UI output, diagnostics or change reports.
+function parse_amnezia_subscription_file(path) {
+    let data = read_file(path);
+    if (data == null)
+        return { ok: false, error: 'Cannot read subscription' };
+    return require('subscription.amnezia_subscription').validated(data);
+}
+
 function module_exports() {
     return {
         parse_subscription_source_entry,
+        parse_amnezia_subscription_file,
         add_certificate_pins,
         validate_subscription,
         normalize_content_validated,
