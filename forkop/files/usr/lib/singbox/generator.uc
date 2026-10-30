@@ -1450,7 +1450,7 @@ function empty_urltest_details(section, urltest_id, candidate_tags, state) {
         if (name == "")
             continue;
         name = change_report.safe_name(name);
-        if (!contains(available, name) && length(available) < 8)
+        if (index(available, name) < 0 && length(available) < 8)
             push(available, name);
     }
     return "; filter mode: " + as_string(connections.urltest_filter_mode(section, urltest_id)) +

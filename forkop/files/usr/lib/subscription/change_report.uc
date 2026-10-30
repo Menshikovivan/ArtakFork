@@ -40,8 +40,8 @@ function compare(previous, next) {
     for (let i = 0; i < length(fresh); i++) {
         let key = identity.connection_key(fresh[i]);
         for (let j = 0; j < length(old); j++) {
-            if (!used_old[j] && identity.connection_key(old[j]) == key) {
-                used_new[i] = true; used_old[j] = true;
+            if (!used_old["" + j] && identity.connection_key(old[j]) == key) {
+                used_new["" + i] = true; used_old["" + j] = true;
                 if (label(old[j]) != label(fresh[i]))
                     push(changed, { before: label(old[j]), after: label(fresh[i]), kind: "renamed" });
                 break;
@@ -49,21 +49,21 @@ function compare(previous, next) {
         }
     }
     for (let i = 0; i < length(fresh); i++) {
-        if (used_new[i]) continue;
+        if (used_new["" + i]) continue;
         let name = label(fresh[i]);
         if (name == "[name hidden]") continue;
         let old_index = -1, old_count = 0, new_count = 0;
         for (let j = 0; j < length(old); j++)
-            if (!used_old[j] && label(old[j]) == name) { old_index = j; old_count++; }
+            if (!used_old["" + j] && label(old[j]) == name) { old_index = j; old_count++; }
         for (let j = 0; j < length(fresh); j++)
-            if (!used_new[j] && label(fresh[j]) == name) new_count++;
+            if (!used_new["" + j] && label(fresh[j]) == name) new_count++;
         if (old_count == 1 && new_count == 1) {
-            used_old[old_index] = true; used_new[i] = true;
+            used_old["" + old_index] = true; used_new["" + i] = true;
             push(changed, { before: name, after: name, kind: "connection_changed" });
         }
     }
-    for (let i = 0; i < length(fresh); i++) if (!used_new[i]) push(added, label(fresh[i]));
-    for (let i = 0; i < length(old); i++) if (!used_old[i]) push(removed, label(old[i]));
+    for (let i = 0; i < length(fresh); i++) if (!used_new["" + i]) push(added, label(fresh[i]));
+    for (let i = 0; i < length(old); i++) if (!used_old["" + i]) push(removed, label(old[i]));
     return { baseline: type(previous) != "object", added, removed, changed };
 }
 

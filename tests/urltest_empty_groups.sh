@@ -72,6 +72,8 @@ fi
 grep -Fq '[name hidden]' "$WORK_DIR/private.out" "$WORK_DIR/private.err" &&
   grep -Fq 'DE backup' "$WORK_DIR/private.out" "$WORK_DIR/private.err" ||
   fail "URLTest diagnostics did not mask sensitive names or preserve a safe name"
+hidden_count=$(grep -hFo '[name hidden]' "$WORK_DIR/private.out" "$WORK_DIR/private.err" | wc -l)
+[ "$hidden_count" -eq 1 ] || fail "identical redacted names were not deduplicated"
 for secret in '12345678-1234-1234-1234-123456789abc' 'token-Private123' '192.0.2.45'; do
   if grep -Fq "$secret" "$WORK_DIR/private.out" "$WORK_DIR/private.err"; then
     fail "URLTest diagnostics exposed a sensitive candidate name"

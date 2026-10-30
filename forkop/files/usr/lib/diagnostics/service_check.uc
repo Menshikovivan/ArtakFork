@@ -16,7 +16,7 @@ function selected_leaf(proxies, config, requested) {
         let t = lc("" + (outbound.type || ""));
         if (t == "selector" || t == "urltest" || t == "priority") {
             let next = proxies[tag].now;
-            if (type(next) != "string" || next == "" || !contains(outbound.outbounds || [], next))
+            if (type(next) != "string" || next == "" || index(outbound.outbounds || [], next) < 0)
                 return null;
             tag = next;
             continue;
