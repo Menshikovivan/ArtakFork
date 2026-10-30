@@ -28,7 +28,7 @@ jobs:
       - name: Install QEMU and serial harness
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-system-x86 python3-pexpect
+          sudo apt-get install -y qemu-system-x86 qemu-utils python3-pexpect parted e2fsprogs
       - name: Download and verify official OpenWrt image
         shell: bash
         run: |
@@ -36,6 +36,15 @@ jobs:
           curl -fL --retry 3 -o "$RUNNER_TEMP/openwrt.img.gz" 'https://downloads.openwrt.org/releases/25.12.6/targets/x86/64/openwrt-25.12.6-x86-64-generic-ext4-combined.img.gz'
           echo 'f8538784d0288b4133a99ac2a68443e4922ffde6343e80df56a5882364b9d499  '"$RUNNER_TEMP/openwrt.img.gz" | sha256sum -c
           gzip -dc "$RUNNER_TEMP/openwrt.img.gz" > "$RUNNER_TEMP/openwrt.img"
+          # Expand only the disposable copy, leaving the verified download intact.
+          qemu-img resize "$RUNNER_TEMP/openwrt.img" 512M
+          loop=$(sudo losetup --find --show --partscan "$RUNNER_TEMP/openwrt.img")
+          trap 'sudo losetup -d "$loop"' EXIT
+          test "$(sudo blkid -s TYPE -o value "${loop}p2")" = ext4
+          sudo parted -s "$loop" resizepart 2 100%
+          sudo partprobe "$loop"
+          sudo e2fsck -pf "${loop}p2" || test "$?" -eq 1
+          sudo resize2fs "${loop}p2"
       - name: Test real OpenWrt netifd and kmod peers
         env:
           ARTAK_E2E_PACKAGES: ${{ runner.temp }}/artak-e2e-packages
