@@ -105,8 +105,12 @@ ip netns exec artak-e2e ping -c 3 -W 3 10.88.1.1 || { echo 'peer-to-imported int
 
 echo 'E2E stage: apply Forkop lifecycle and verify guard/config'
 /etc/init.d/firewall start
-/etc/init.d/forkop restart
-test -s /etc/sing-box/config.json
-ucode -e 'let f=require("fs");let c=json(f.readfile("/etc/sing-box/config.json"));let n=ARGV[0];if(!filter(c.outbounds||[],x=>x.bind_interface==n && x.routing_mark!=null)[0])exit(1);' "$iface"
-nft list table inet ForkopTable | grep -Fq "$iface"
+/etc/init.d/forkop restart || { echo 'Forkop restart command failed' >&2; exit 1; }
+count=0
+while [ ! -s /etc/sing-box/config.json ]; do
+    count=$((count+1)); [ "$count" -lt 60 ] || { echo 'Forkop config not generated after restart' >&2; logread | grep -E 'forkop|sing-box' | tail -50 | sed -E 's/[A-Za-z0-9+\/]{42,43}=/[REDACTED]/g' || :; exit 1; }
+    sleep 1
+done
+ucode -e 'let f=require("fs");let c=json(f.readfile("/etc/sing-box/config.json"));let n=ARGV[0];if(!filter(c.outbounds||[],x=>x.bind_interface==n && x.routing_mark!=null)[0])exit(1);' "$iface" || { echo 'generated config lacks AWG outbound or mark' >&2; exit 1; }
+nft list table inet ForkopTable | grep -Fq "$iface" || { echo 'nft guard does not mention AWG interface' >&2; exit 1; }
 echo ARTAK_E2E_PASSED
