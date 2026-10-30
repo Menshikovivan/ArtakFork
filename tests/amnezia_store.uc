@@ -4,6 +4,8 @@ let store = require('subscription.amnezia_store');
 let subscription = require('subscription.amnezia_subscription');
 let main_parser = require('subscription.parser');
 let candidates = require('subscription.amnezia_candidates');
+let candidate_apply = require('subscription.amnezia_candidate_apply');
+let active = require('subscription.amnezia_active');
 function expect(v, message) { if (!v) die('FAIL: ' + message + '\n'); }
 let dir = ARGV[0];
 let id = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
@@ -34,6 +36,31 @@ expect(plan.plans[0].routing.entries[0].options.table == '10001', 'candidate los
 expect(!candidates.prepare(dir, 'rule_1', other, allocation).ok, 'wrong identity planned');
 expect(!candidates.prepare(dir, 'rule_1', id, []).ok, 'missing allocation accepted');
 expect(store.save(dir, 'rule_2', id, vpn + '\n' + vpn), 'two-profile candidate write failed');
+let old_two = fs.readfile(dir + '/rule_2.awg.json');
+let called = 0;
+let fake_apply = function(text, name, table, priority, timeout, options) {
+    called++;
+    expect(text == good && name == 'afawg_a1' && table == '10001' && priority == '1000', 'apply arguments changed');
+    return { ok: true };
+};
+let applied = candidate_apply.apply_one(dir, 'rule_2', id, 1, allocation[0], 1000, { apply_driver: fake_apply });
+expect(applied.ok && called == 1, 'selected candidate not passed to runtime');
+expect(!candidate_apply.apply_one(dir, 'rule_2', other, 0, allocation[0], 1000, { apply_driver: fake_apply }).ok && called == 1, 'wrong source reached runtime');
+expect(!candidate_apply.apply_one(dir, 'rule_2', id, 7, allocation[0], 1000, { apply_driver: fake_apply }).ok && called == 1, 'invalid index reached runtime');
+let failing = function() { return { ok: false, error: key }; };
+let failure = candidate_apply.apply_one(dir, 'rule_2', id, 0, allocation[0], 1000, { apply_driver: failing });
+expect(!failure.ok && index(sprintf('%J', failure), key) < 0, 'runtime error leaked secret');
+expect(fs.readfile(dir + '/rule_2.awg.json') == old_two, 'failed runtime touched selected candidate');
+let active_dir = dir + '/active';
+expect(fs.mkdir(active_dir), 'could not create active fixture directory');
+let revision = 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
+let manifest = { dir: active_dir, revision: revision, verify: function(e) { return e.name == 'afawg_a1'; } };
+let applied_mapped = candidate_apply.apply_one_and_record(dir, 'rule_2', id, 1, allocation[0], 1000, { apply_driver: fake_apply }, manifest);
+expect(applied_mapped.ok && length(active.restore(active_dir, 'rule_2', id, revision, manifest.verify)) == 1, 'active mapping was not written after verified apply');
+let previous_mapping = fs.readfile(active_dir + '/rule_2.json');
+manifest.verify = function(e) { return false; };
+let failed_map = candidate_apply.apply_one_and_record(dir, 'rule_2', id, 0, allocation[0], 1000, { apply_driver: fake_apply }, manifest);
+expect(!failed_map.ok && failed_map.cleanup_required && fs.readfile(active_dir + '/rule_2.json') == previous_mapping, 'failed mapping was accepted or overwrote previous');
 let two = [
     { name: 'afawg_a1', table: '10001', priority: '1000' },
     { name: 'afawg_a2', table: '10002', priority: '1002' }

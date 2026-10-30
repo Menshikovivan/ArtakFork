@@ -14,7 +14,8 @@ function identity_ok(identity) {
     return type(identity) == 'string' && match(identity, /^[0-9a-f]{64}$/) != null;
 }
 
-function load(dir, source, identity) {
+// Internal use only. Each result contains credentials and must not be logged.
+function load_configs(dir, source, identity) {
     if (!source_ok(source) || !identity_ok(identity)) return null;
     let content = fs.readfile(dir + '/' + source + '.awg.json');
     if (content == null || length(content) > 1048576) return null;
@@ -22,13 +23,17 @@ function load(dir, source, identity) {
     try { record = json(content); } catch (e) { return null; }
     if (type(record) != 'object' || record.version != 1 || record.identity != identity ||
         type(record.configs) != 'array' || !length(record.configs) || length(record.configs) > 32) return null;
-    let profiles = [];
     for (let config in record.configs) {
         let parsed = parser.parse_conf(config);
         if (!parsed.ok || length(parsed.peers) != 1) return null;
-        push(profiles, parsed);
     }
-    return profiles;
+    return record.configs;
+}
+
+function load(dir, source, identity) {
+    let configs = load_configs(dir, source, identity);
+    if (configs == null) return null;
+    return map(configs, config => parser.parse_conf(config));
 }
 
 function save(dir, source, identity, data) {
@@ -52,4 +57,4 @@ function save(dir, source, identity, data) {
     return true;
 }
 
-return { save, load };
+return { save, load, load_configs };
