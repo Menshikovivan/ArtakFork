@@ -31,16 +31,16 @@ function run(text, section, opts) {
     try {
         got_sub = acquire(slock, pid);
         if (!got_sub || pending())
-            throw 'pending';
-        if (!fs.mkdir(delta, 0700)) throw 'delta';
+            die('pending');
+        if (!fs.mkdir(delta, 0700)) die('delta');
         created = true;
         let cursor = uci.cursor(config_dir, delta, '');
         let bound = binding.bind(cursor, section, source.new_id);
-        if (!bound.ok) throw 'bind';
+        if (!bound.ok) die('bind');
         let dirs = opts.dirs || {candidate:'/etc/forkop/awg-manual-candidates', last_good:'/etc/forkop/awg-last-good', active:'/etc/forkop/awg-active'};
         // Replacement needs a separate transactional swap. Never overwrite an
         // existing active mapping while its old interface is still in use.
-        if (fs.stat(dirs.active + '/' + bound.source + '.json') != null) throw 'already-active';
+        if (fs.stat(dirs.active + '/' + bound.source + '.json') != null) die('already-active');
         let apply = type(opts.activate) == 'function' ? opts.activate : activation.activate;
         result = apply(text, bound.source, bound.identity, dirs, {
             current: function() {
