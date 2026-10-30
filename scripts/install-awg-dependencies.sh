@@ -4,6 +4,9 @@ set -eu
 umask 077
 
 fail() { echo "AmneziaWG dependencies: $*" >&2; exit 1; }
+[ "$#" -eq 1 ] || fail 'Usage: install-awg-dependencies.sh ARTAKFORK_VERSION'
+version=$1
+case "$version" in ''|*[!a-zA-Z0-9.-]*) fail 'Invalid ArtakFork version.';; esac
 [ "$(id -u)" = 0 ] || fail 'Run as root.'
 [ -r /etc/openwrt_release ] || fail 'OpenWrt release information missing.'
 . /etc/openwrt_release
@@ -16,7 +19,7 @@ for cmd in apk wget sha256sum sysupgrade mktemp; do
 done
 tmp=$(mktemp -d /tmp/artak-awg.XXXXXX) || fail 'Cannot create temporary directory.'
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
-base=https://github.com/2Grey/awg-openwrt/releases/download/v25.12.6
+base="https://github.com/Menshikovivan/ArtakFork/releases/download/$version"
 suffix=v25.12.6_aarch64_cortex-a53_mediatek_filogic.apk
 download() {
     name=$1; expected=$2

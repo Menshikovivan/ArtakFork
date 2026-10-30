@@ -41,7 +41,7 @@ echo "$h  $1"''')
         path.chmod(0o755)
 
     def run_script(self):
-        return subprocess.run(['sh', str(self.script)], env=self.env, capture_output=True, text=True)
+        return subprocess.run(['sh', str(self.script), '2.4.3-canary.8'], env=self.env, capture_output=True, text=True)
 
     def test_success_simulates_then_backs_up_then_installs_without_force(self):
         result = self.run_script()
