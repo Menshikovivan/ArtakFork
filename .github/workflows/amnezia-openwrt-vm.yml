@@ -1,0 +1,37 @@
+name: AmneziaWG OpenWrt kernel VM
+
+on:
+  push:
+    paths:
+      - 'tests/amnezia_openwrt_guest.sh'
+      - 'tests/amnezia_openwrt_vm.py'
+      - '.github/workflows/amnezia-openwrt-vm.yml'
+  pull_request:
+    paths:
+      - 'tests/amnezia_openwrt_guest.sh'
+      - 'tests/amnezia_openwrt_vm.py'
+      - '.github/workflows/amnezia-openwrt-vm.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  openwrt-kmod:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5.0.0
+      - name: Install QEMU and serial harness
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 python3-pexpect
+      - name: Download and verify official OpenWrt image
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 -o "$RUNNER_TEMP/openwrt.img.gz" 'https://downloads.openwrt.org/releases/25.12.6/targets/x86/64/openwrt-25.12.6-x86-64-generic-ext4-combined.img.gz'
+          echo 'f8538784d0288b4133a99ac2a68443e4922ffde6343e80df56a5882364b9d499  '"$RUNNER_TEMP/openwrt.img.gz" | sha256sum -c
+          gzip -dc "$RUNNER_TEMP/openwrt.img.gz" > "$RUNNER_TEMP/openwrt.img"
+      - name: Test real OpenWrt netifd and kmod peers
+        run: /usr/bin/python3 tests/amnezia_openwrt_vm.py "$RUNNER_TEMP/openwrt.img"
