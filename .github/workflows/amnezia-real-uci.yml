@@ -85,6 +85,7 @@ jobs:
           chmod +x "$RUNNER_TEMP/awg-test-bin/ucode"
           export PATH="$RUNNER_TEMP/awg-test-bin:$PATH"
           bash tests/amnezia_import_real_uci.sh
+          bash tests/amnezia_batch.sh
       - name: Exercise executable plugin with real rpcd and ubus
         shell: bash
         run: |
