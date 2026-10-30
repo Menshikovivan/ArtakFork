@@ -38,7 +38,8 @@ def main():
             # BusyBox ash/serial line editing truncates long interactive lines.
             for pos in range(0, len(encoded), 128):
                 command(vm, "printf '%s' '" + encoded[pos:pos + 128] + "' >> /tmp/artak-guest.b64")
-            command(vm, 'base64 -d /tmp/artak-guest.b64 > ' + guest_name)
+            # OpenWrt's default BusyBox image need not include base64(1).
+            command(vm, "ucode -e 'let f=require(\"fs\");let b=f.readfile(\"/tmp/artak-guest.b64\");let d=b64dec(b);if(d==null||f.writefile(\"" + guest_name + "\",d)==null)exit(1);'")
         upload('amnezia_openwrt_guest.sh', '/tmp/artak-guest.sh')
         upload('openwrt_fw4_guard.sh', '/tmp/artak-fw4.sh')
         command(vm, 'sh /tmp/artak-guest.sh', timeout=600)
