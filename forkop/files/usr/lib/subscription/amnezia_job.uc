@@ -1,0 +1,57 @@
+// One private job at a time. Secrets are never returned by status or passed in argv.
+let fs = require('fs');
+let common = require('core.common');
+let parser = require('subscription.amnezia_conf');
+let root = getenv('ARTAK_AWG_JOB_TEST_DIR') || '/tmp/artak-awg-job';
+function write_state(state) {
+    let tmp = root + '/state.tmp';
+    return common.write_private_json_file(tmp, state) != null && fs.rename(tmp, root + '/state.json');
+}
+function status() {
+    let raw = fs.readfile(root + '/state.json'), state = null;
+    if (raw == null || length(raw) > 4096) return { ok: false, state: 'unknown' };
+    try { state = json(raw); } catch (e) { return { ok: false, state: 'unknown' }; }
+    if (type(state) != 'object') return { ok: false, state: 'unknown' };
+    if (state.state == 'running') {
+        // A killed worker may leave the input behind. Keep the lock and never
+        // start a second job until the router state has been inspected.
+        if (type(state.started) == 'int' && time() - state.started > 180) {
+            fs.unlink(root + '/input');
+            return { ok: true, state: 'stale' };
+        }
+        return { ok: true, state: 'running' };
+    }
+    if (state.state == 'done' && type(state.name) == 'string' && match(state.name, /^afawg_[a-z0-9]{1,8}$/))
+        return { ok: true, state: 'done', name: state.name };
+    if (state.state == 'failed') return { ok: true, state: 'failed' };
+    return { ok: false, state: 'unknown' };
+}
+function start(config, launcher) {
+    if (type(config) != 'string' || length(config) > 65536 || !parser.parse_conf(config).ok)
+        return { ok: false, error: 'Invalid configuration' };
+    if (!common.secure_private_dir(root)) return { ok: false, error: 'Unable to prepare job' };
+    // Atomic mkdir prevents parallel start requests, including finished-job cleanup races.
+    if (!fs.mkdir(root + '/lock', 0700)) return { ok: false, error: 'Job is active or requires inspection' };
+    if (common.write_private_file(root + '/input', config) == null || !write_state({ state: 'running', started: time() })) {
+        fs.unlink(root + '/input'); fs.rmdir(root + '/lock'); return { ok: false, error: 'Unable to prepare job' };
+    }
+    let ok = false;
+    try { ok = launcher(); } catch (e) {}
+    if (!ok) {
+        fs.unlink(root + '/input'); write_state({ state: 'failed' }); fs.rmdir(root + '/lock');
+        return { ok: false, error: 'Unable to launch job' };
+    }
+    return { ok: true, state: 'running' };
+}
+function run(driver) {
+    let config = fs.readfile(root + '/input');
+    fs.unlink(root + '/input');
+    let result = null;
+    try { if (config != null) result = driver(config); } catch (e) {}
+    let state = type(result) == 'object' && result.ok === true &&
+        type(result.name) == 'string' && match(result.name, /^afawg_[a-z0-9]{1,8}$/) ?
+        { state: 'done', name: result.name } : { state: 'failed' };
+    if (write_state(state)) fs.rmdir(root + '/lock');
+    // A failed state write retains the lock; never silently allow another apply.
+}
+return { start, status, run };

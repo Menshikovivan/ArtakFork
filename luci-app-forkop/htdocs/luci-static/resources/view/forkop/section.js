@@ -19,6 +19,7 @@ const awgPreflightRpc = rpc.declare({
 const awgImportRpc = rpc.declare({
   object: "luci.artak_awg", method: "import_conf", params: ["config"],
 });
+const awgImportStatusRpc = rpc.declare({ object: "luci.artak_awg", method: "import_status", params: [] });
 
 function showAmneziaPreflight() {
   const limit = 262144;
@@ -59,6 +60,20 @@ function showAmneziaImport() {
   const input = E("input", { type: "file", accept: ".conf,text/plain" });
   const status = E("p", { role: "status" }, "Выберите файл размером до 64 КиБ.");
   const action = E("button", { type: "button", class: "btn cbi-button cbi-button-action", disabled: true }, "Создать интерфейс");
+  const checkStatus = E("button", { type: "button", class: "btn" }, "Проверить статус импорта");
+  async function poll() {
+    for (let i = 0; i < 90; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      let result;
+      try { result = await awgImportStatusRpc(); } catch (_error) { continue; }
+      if (!result || !result.ok) continue;
+      if (result.state === "stale") { status.textContent = "Задача не завершилась вовремя. Проверьте состояние интерфейсов и журнал роутера; повторный импорт заблокирован."; return; }
+      if (result.state === "done") { status.textContent = "Интерфейс создан: " + result.name + ". Добавьте его в настройку соединения Forkop."; return; }
+      if (result.state === "failed") { status.textContent = "Импорт не завершён. Проверьте интерфейсы и журнал роутера перед повторной попыткой."; return; }
+    }
+    status.textContent = "Нет окончательного результата. Проверьте состояние интерфейсов и журнал роутера перед повторной попыткой.";
+  }
+  checkStatus.addEventListener("click", () => { status.textContent = "Проверка состояния…"; poll(); });
   input.addEventListener("change", () => {
     const file = input.files && input.files[0];
     action.disabled = !file || file.size > 65536;
@@ -71,9 +86,8 @@ function showAmneziaImport() {
     status.textContent = "Создание и проверка соединения…";
     try {
       const result = await awgImportRpc(await file.text());
-      status.textContent = result && result.ok ?
-        "Интерфейс создан: " + result.name + ". Добавьте его в настройку соединения Forkop." :
-        "Импорт не завершён. Проверьте интерфейсы и журнал роутера перед повторной попыткой.";
+      if (result && result.ok && result.state === "running") await poll();
+      else status.textContent = "Не удалось начать импорт. Проверьте состояние интерфейсов и журнал роутера перед повторной попыткой.";
     } catch (_error) {
       status.textContent = "Ответ не получен. Перед повторной попыткой проверьте состояние интерфейсов роутера.";
     } finally { input.value = ""; action.disabled = true; }
@@ -81,7 +95,7 @@ function showAmneziaImport() {
   ui.showModal("Экспериментальный импорт AmneziaWG", [
     E("p", {}, "Импорт создаёт сетевой интерфейс и перезагружает настройки сети; связь может временно прерваться. Перед запуском примените или отмените все несохранённые изменения LuCI."),
     E("p", {}, "Файл содержит приватный ключ. Для защиты передачи используйте LuCI по HTTPS."),
-    input, status, action,
+    input, status, action, checkStatus,
     E("button", { type: "button", class: "btn", click: () => ui.hideModal() }, "Закрыть"),
   ]);
 }

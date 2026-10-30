@@ -1,0 +1,23 @@
+let fs = require('fs');
+let job = require('subscription.amnezia_job');
+function expect(ok, message) { if (!ok) die('FAIL: ' + message + '\n'); }
+let root = getenv('ARTAK_AWG_JOB_TEST_DIR');
+expect(type(root) == 'string' && root != '', 'isolated test directory');
+let key = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
+let config = '[Interface]\nPrivateKey = ' + key + '\nAddress = 10.0.0.2/32\n[Peer]\nPublicKey = ' + key + '\nEndpoint = example.com:443\nAllowedIPs = 0.0.0.0/0\n';
+expect(job.start(config, function() { return true; }).ok, 'start');
+expect(job.status().state == 'running', 'running status');
+expect(!job.start(config, function() { return true; }).ok, 'no simultaneous start');
+job.run(function(input) { expect(input == config, 'worker receives content'); return { ok: true, name: 'afawg_1', secret: key }; });
+expect(fs.stat(root + '/input') == null, 'input removed');
+let state = job.status();
+expect(state.state == 'done' && state.name == 'afawg_1', 'completed status');
+expect(index(sprintf('%J', state), key) < 0, 'status redacts secret');
+expect(job.start(config, function() { return false; }).ok == false, 'launch failure');
+expect(job.status().state == 'failed' && fs.stat(root + '/input') == null, 'failed launch cleanup');
+expect(job.start(config, function() { return true; }).ok, 'restart after failure');
+job.run(function() { die('SECRET_DO_NOT_LOG'); });
+expect(job.status().state == 'failed' && index(sprintf('%J', job.status()), 'SECRET_DO_NOT_LOG') < 0, 'worker failure redacted');
+fs.writefile(root + '/state.json', sprintf('%J', {state:'done', name:'afawg_2', secret:key}));
+expect(index(sprintf('%J', job.status()), key) < 0, 'status strips unexpected fields');
+print('AmneziaWG job lifecycle checks passed\n');

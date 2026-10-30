@@ -9,7 +9,7 @@ ucode -L "$LIB" "$RPC" list > "$WORK/list.json"
 python3 - "$WORK" <<'PY'
 import json, os, sys
 w = sys.argv[1]
-assert json.load(open(os.path.join(w, 'list.json'))) == {'preflight': {'config': ''}, 'import_conf': {'config': ''}}
+assert json.load(open(os.path.join(w, 'list.json'))) == {'preflight': {'config': ''}, 'import_conf': {'config': ''}, 'import_status': {}}
 key = 'A' * 43 + '='
 conf = '[Interface]\nPrivateKey = ' + key + '\nAddress = 10.0.0.2/32\n[Peer]\nPublicKey = ' + key + '\nEndpoint = example.com:443\nAllowedIPs = 0.0.0.0/0\n'
 for name, value in [('good', conf), ('bad', conf + 'PostUp = DO_NOT_LEAK_SECRET\n'), ('large', 'x' * 262145)]:
