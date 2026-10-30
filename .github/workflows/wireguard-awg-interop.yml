@@ -1,0 +1,35 @@
+name: WireGuard and AmneziaWG kernel interoperability
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'tests/wireguard_awg_interop_guest.sh'
+      - 'tests/wireguard_awg_interop_vm.py'
+      - '.github/workflows/wireguard-awg-interop.yml'
+  pull_request:
+    paths:
+      - 'tests/wireguard_awg_interop_guest.sh'
+      - 'tests/wireguard_awg_interop_vm.py'
+      - '.github/workflows/wireguard-awg-interop.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  interop:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5.0.0
+      - name: Install QEMU and serial harness
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 python3-pexpect
+      - name: Download pinned OpenWrt image
+        run: |
+          curl -fL --retry 3 -o "$RUNNER_TEMP/openwrt.img.gz" 'https://downloads.openwrt.org/releases/25.12.6/targets/x86/64/openwrt-25.12.6-x86-64-generic-ext4-combined.img.gz'
+          echo 'f8538784d0288b4133a99ac2a68443e4922ffde6343e80df56a5882364b9d499  '"$RUNNER_TEMP/openwrt.img.gz" | sha256sum -c
+          gzip -dc "$RUNNER_TEMP/openwrt.img.gz" > "$RUNNER_TEMP/openwrt.img"
+      - name: Exercise real kernel tunnel between stock WG and AWG
+        run: /usr/bin/python3 tests/wireguard_awg_interop_vm.py "$RUNNER_TEMP/openwrt.img"
