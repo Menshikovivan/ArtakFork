@@ -20,7 +20,8 @@ function run(text, section, opts) {
     let job_root = opts.job_root || root;
     let rlock = opts.reload_lock || reload_lock, slock = opts.subscription_lock || subscription_lock;
     let pending = type(opts.pending) == 'function' ? opts.pending : function() {
-        return fs.stat('/tmp/.uci/forkop') != null || fs.stat('/tmp/.uci/network') != null;
+        let pending = require('subscription.amnezia_pending');
+        return pending.pending('/tmp/.uci/forkop') || pending.pending('/tmp/.uci/network');
     };
     if (!feature() || type(section) != 'string' ||
         !match(section, /^[A-Za-z0-9_]{1,80}$/)) return {ok:false};

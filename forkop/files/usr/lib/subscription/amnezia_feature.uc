@@ -5,7 +5,7 @@ function enabled(cursor) {
         if (cursor == null) {
             // libuci always adds /tmp/.uci to the delta path even with an
             // alternate savedir. Never interpret a staged toggle as committed.
-            if (require('fs').stat('/tmp/.uci/forkop') != null) return false;
+            if (require('subscription.amnezia_pending').pending('/tmp/.uci/forkop')) return false;
             cursor = require('uci').cursor('/etc/config', '/dev/null', '');
         }
         if (!cursor || cursor.load('forkop') == null) return false;

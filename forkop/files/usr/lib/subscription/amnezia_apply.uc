@@ -41,7 +41,7 @@ function apply_internal(text, name, table, priority, timeout_ms, opts, lease) {
     try {
         // Standard UCI saved deltas are shared with LuCI and may be applied by
         // network reload. Refuse if present; this does not eliminate races.
-        if (config_dir == '/etc/config' && fs.stat('/tmp/.uci/network') != null)
+        if (config_dir == '/etc/config' && require('subscription.amnezia_pending').pending('/tmp/.uci/network'))
             return { ok: false, error: 'Pending network changes detected; apply or discard them first' };
         let available = runtime_check.check(table, priority, opts.runtime_runner);
         if (!available.ok) return available;
@@ -72,7 +72,7 @@ function apply_internal(text, name, table, priority, timeout_ms, opts, lease) {
         if (!importer.commit_staged(cursor).ok)
             return { ok: false, error: 'Commit uncertain; inspect network configuration' };
         committed = true;
-        if (config_dir == '/etc/config' && fs.stat('/tmp/.uci/network') != null)
+        if (config_dir == '/etc/config' && require('subscription.amnezia_pending').pending('/tmp/.uci/network'))
             return { ok: false, error: 'Pending network changes appeared; inspect owned configuration' };
         available = runtime_check.check(table, priority, opts.runtime_runner);
         if (!available.ok) return { ok: false, error: 'Kernel routing changed; inspect owned configuration' };
@@ -136,7 +136,7 @@ function cleanup_internal(text, name, table, priority, opts, lease) {
     let created_delta = false;
     function process() {
         try {
-            if (config_dir == '/etc/config' && fs.stat('/tmp/.uci/network') != null)
+            if (config_dir == '/etc/config' && require('subscription.amnezia_pending').pending('/tmp/.uci/network'))
                 return {ok:false,error:'Pending network changes detected'};
             if (!fs.chmod(lock_dir, 448) || !fs.mkdir(delta)) return {ok:false,error:'Could not create private UCI workspace'};
             created_delta = true;
@@ -155,7 +155,7 @@ function cleanup_internal(text, name, table, priority, opts, lease) {
                 return {ok:false,error:'Could not stage cleanup'};
             if (borrowed && !valid_lease(lease)) return {ok:false,error:'AWG lock lost before cleanup commit'};
             if (!c.commit('network')) return {ok:false,error:'Cleanup commit uncertain; inspect network'};
-            if (config_dir == '/etc/config' && fs.stat('/tmp/.uci/network') != null)
+            if (config_dir == '/etc/config' && require('subscription.amnezia_pending').pending('/tmp/.uci/network'))
                 return {ok:false,error:'Pending network changes appeared; reload refused'};
             if (borrowed && !valid_lease(lease)) return {ok:false,error:'AWG lock lost before reload; inspect network'};
             if (!activation.reload(opts.runner).ok) return {ok:false,error:'Cleanup committed but network reload failed'};

@@ -14,7 +14,7 @@ echo 'E2E stage: verify temporary package uplink'
 ip route get 10.0.2.2
 ping -c 1 -W 2 10.0.2.2 >/dev/null || { echo 'VM package gateway unreachable' >&2; nft list ruleset; exit 1; }
 for package in forkop luci-app-forkop; do
-    wget -O "/tmp/$package.apk" "$ARTAK_MIRROR/artak/${package}_2.4.3-canary.7.apk" || { echo "VM package download failed: $package" >&2; nft list ruleset; exit 1; }
+    wget -O "/tmp/$package.apk" "$ARTAK_MIRROR/artak/${package}_2.4.3-canary.8.apk" || { echo "VM package download failed: $package" >&2; nft list ruleset; exit 1; }
 done
 apk --allow-untrusted --simulate add /tmp/forkop.apk /tmp/luci-app-forkop.apk >/dev/null
 apk --allow-untrusted add /tmp/forkop.apk /tmp/luci-app-forkop.apk >/dev/null
@@ -53,9 +53,7 @@ for config in forkop network; do
     delta="/tmp/.uci/$config"
     if [ -e "$delta" ]; then
         echo "E2E stage: $config UCI delta bytes=$(wc -c < "$delta")"
-        # Empty files left by uci commit are not pending changes; this is a
-        # disposable guest and we never discard nonempty staged configuration.
-        [ -s "$delta" ] || rm -f "$delta"
+        # Preserve the file to exercise production handling of empty deltas.
     fi
 done
 printf '[Interface]\nPrivateKey = %s\nAddress = 10.88.1.1/32\nListenPort = 29001\n[Peer]\nPublicKey = %s\nEndpoint = 127.0.0.1:29002\nAllowedIPs = 0.0.0.0/0\nPersistentKeepalive = 2\n' "$(cat /tmp/e2e-client.key)" "$(cat /tmp/e2e-peer.pub)" >/tmp/e2e.conf
@@ -77,6 +75,7 @@ if [ "$state" != done ]; then
     echo "import failed: $state" >&2
     echo 'E2E stage: retry isolated worker for sanitized result'
     ucode -L /usr/lib/forkop -e 'let f=require("fs"), w=require("subscription.amnezia_manual_worker");let r=w.run(f.readfile("/tmp/e2e.conf"),"e2etest");print(sprintf("worker ok=%J error=%J cleanup_required=%J\n",r?.ok,r?.error,r?.cleanup_required));' || :
+    ucode -L /usr/lib/forkop -e 'let a=require("subscription.amnezia_allocate"), c=require("uci").cursor(), r=a.choose(c,{});print(sprintf("allocator ok=%J error=%J\n",r?.ok,r?.error));let k=require("subscription.amnezia_runtime_check").check("15001","16002");print(sprintf("kernel check ok=%J error=%J\n",k?.ok,k?.error));let m=require("subscription.amnezia_mark_audit").audit([0x18003a99],{});print(sprintf("mark audit ok=%J error=%J\n",m?.ok,m?.error));' || :
     ubus call network get_proto_handlers 2>/dev/null | grep -o '"amneziawg"' || :
     logread | grep -E 'netifd|forkop|rpcd' | tail -35 | sed -E 's/[A-Za-z0-9+\/]{42,43}=/[REDACTED]/g' || :
     exit 1
