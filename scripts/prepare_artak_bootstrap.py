@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify pinned releases against latest, then preserve their public assets."""
+"""Verify stable release pins and preserve their public assets."""
 import argparse
 import hashlib
 import json
@@ -28,7 +28,7 @@ def constant(text, name):
     return matches[0]
 
 
-def prepare(installer, output, check_only=False):
+def prepare(installer, output, check_only=False, use_pinned=False):
     text = installer.read_text(encoding="utf-8")
     forkop = constant(text, "BASE_VERSION")
     extended = constant(text, "ENGINE_VERSION")
@@ -44,9 +44,9 @@ def prepare(installer, output, check_only=False):
     ]
     provenance = {"schema": 1, "releases": []}
     for repo, tag, packages, source_name in specifications:
-        release = api(repo + "/releases/latest")
+        release = api(repo + ("/releases/tags/" + tag if use_pinned else "/releases/latest"))
         if release.get("tag_name") != tag or release.get("draft") or release.get("prerelease"):
-            raise ValueError(f"{repo}: latest stable differs from installer pin {tag}; review and update pins")
+            raise ValueError(f"{repo}: stable release does not match installer pin {tag}; review and update pins")
         commit = api(repo + "/commits/" + tag)["sha"]
         if not re.fullmatch(r"[0-9a-f]{40}", commit):
             raise ValueError("Invalid source commit")
@@ -78,7 +78,7 @@ def prepare(installer, output, check_only=False):
             record["source_archive"] = {"filename": source_name, "url": source_url,
                 "bytes": len(source), "digest": "sha256:" + hashlib.sha256(source).hexdigest()}
         provenance["releases"].append(record)
-        print(f"Verified latest stable {repo} {tag} ({commit})")
+        print(f"Verified {'pinned' if use_pinned else 'latest'} stable {repo} {tag} ({commit})")
     if not check_only:
         (output / "bootstrap-sources.json").write_text(json.dumps(provenance, indent=2) + "\n", encoding="utf-8")
 
@@ -88,7 +88,10 @@ if __name__ == "__main__":
     parser.add_argument("--installer", type=Path, default=Path("artak-install.sh"))
     parser.add_argument("--output", type=Path, default=Path("filtered-bin/artak-release"))
     parser.add_argument("--check-latest", action="store_true")
+    parser.add_argument("--use-pinned", action="store_true", help="Use the explicitly pinned stable releases after compatibility review")
     args = parser.parse_args()
+    if args.check_latest and args.use_pinned:
+        parser.error("--check-latest and --use-pinned are mutually exclusive")
     if not args.check_latest:
         args.output.mkdir(parents=True, exist_ok=True)
-    prepare(args.installer, args.output, args.check_latest)
+    prepare(args.installer, args.output, args.check_latest, args.use_pinned)

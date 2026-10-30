@@ -18,6 +18,7 @@ interface IRenderSectionsProps {
   ) => void;
   onShowUrlTestInfo: (outbound: Forkop.Outbound) => void;
   onShowPriorityInfo: (outbound: Forkop.Outbound) => void;
+  onCheckService?: (outbound: Forkop.Outbound) => void;
   onUpdateSubscription: (section: Forkop.OutboundGroup) => void;
   latencyFetching: boolean;
   latencyProgress?: Forkop.LatencyActionProgress;
@@ -248,6 +249,7 @@ function renderDefaultState({
   onChooseOutbound,
   onShowUrlTestInfo,
   onShowPriorityInfo,
+  onCheckService,
   onTestLatency,
   onUpdateSubscription,
   latencyFetching,
@@ -467,6 +469,23 @@ function renderDefaultState({
             outbound.latency ? `${outbound.latency}ms` : 'N/A',
           ),
         ]),
+        ...(onCheckService && outbound.runtimeAvailable !== false
+          ? [
+              E(
+                'button',
+                {
+                  type: 'button',
+                  class: 'btn',
+                  style: 'margin-top: 8px',
+                  click: (event: MouseEvent) => {
+                    event.stopPropagation();
+                    onCheckService(outbound);
+                  },
+                },
+                _('Check service'),
+              ),
+            ]
+          : []),
         ...(priorityMembers ? [priorityMembers] : []),
       ],
     );

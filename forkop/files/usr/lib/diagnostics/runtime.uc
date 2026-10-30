@@ -543,6 +543,44 @@ function cleanup_check_proxy_dir(dir) {
         command_success_from_args([ "rm", "-rf", dir ]);
 }
 
+// Run the engine's fetch tool in an isolated runtime. The Clash delay API
+// updates the live URLTest history and must not be used for service probes.
+function check_service(service, requested_tag) {
+    let urls = {
+        chatgpt: "https://chatgpt.com/",
+        gemini: "https://gemini.google.com/",
+        discord: "https://discord.com/"
+    };
+    let url = urls[as_string(service)];
+    let config_path = option(settings(), "config_path", "");
+    let config = read_json_file(config_path);
+    let runtime = parse_json_or_null(command_output_from_args([ constants.FORKOP_BIN || "/usr/bin/forkop", "clash_api", "get_proxies" ]));
+    let tag = require("diagnostics.service_check").selected_leaf(object_or_empty(runtime).proxies, config, as_string(requested_tag));
+    if (!url || !tag || !command_exists("sing-box") || !command_exists("timeout")) {
+        write_json({ success: false, error: "Service check unavailable: select an active proxy node or group" });
+        return 1;
+    }
+
+    ensure_dir(TMP_SING_BOX_FOLDER);
+    let dir = trim(command_output_from_args([ "mktemp", "-d", TMP_SING_BOX_FOLDER + "/check-proxy-XXXXXX" ]));
+    if (dir == "") {
+        write_json({ success: false, error: "Failed to create temporary service check" });
+        return 1;
+    }
+    let config_copy = dir + "/config.json";
+    let ready = command_success_from_args([ "chmod", "700", dir ]) &&
+        status_success([ "prepare-check-proxy-config", config_path, config_copy, dir + "/cache.db" ], null) &&
+        command_success_from_args([ "chmod", "600", config_copy ]);
+    let result = ready && command_success_from_args([
+        "timeout", "15", "sing-box", "tools", "fetch", url,
+        "-c", config_copy, "-D", dir, "-o", tag, "--disable-color"
+    ]);
+    cleanup_check_proxy_dir(dir);
+    write_json({ success: !!result, service: service, tag: tag,
+        error: result ? "" : "Connection or HTTPS request failed" });
+    return result ? 0 : 1;
+}
+
 function check_proxy() {
     let sing_box_config_path = option(settings(), "config_path", "");
     if (!command_exists("sing-box")) {
@@ -2315,6 +2353,8 @@ let mode = ARGV[0] || "";
 
 if (mode == "check-proxy")
     exit(check_proxy());
+else if (mode == "check-service")
+    exit(check_service(ARGV[1], ARGV[2]));
 else if (mode == "check-nft")
     exit(check_nft());
 else if (mode == "check-nft-rules")

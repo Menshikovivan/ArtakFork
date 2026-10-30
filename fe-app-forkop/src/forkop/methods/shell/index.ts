@@ -284,6 +284,13 @@ export const ForkopShellMethods = {
     callBaseMethod<unknown>(Forkop.AvailableMethods.CLASH_API, [
       Forkop.AvailableClashAPIMethods.GET_CONNECTIONS,
     ]),
+  checkService: async (service: string, tag: string) =>
+    callBaseMethod<Forkop.ServiceCheckResult>(
+      Forkop.AvailableMethods.CHECK_SERVICE,
+      [service, tag],
+      '/usr/bin/forkop',
+      { allowNonZeroWithStdout: true, timeout: 25000 },
+    ),
   getClashApiProxyLatency: async (tag: string, timeout = '5000') =>
     callBaseMethod<Forkop.GetClashApiProxyLatency>(
       Forkop.AvailableMethods.CLASH_API,

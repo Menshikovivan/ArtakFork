@@ -70,6 +70,8 @@ function show_help() {
     print("                            Start forced subscription update in the background\n");
     print("    subscription_update_status [job_id]\n");
     print("                            Get background subscription update status\n");
+    print("    subscription_update_report\n");
+    print("                            Show the latest redacted subscription change report\n");
     print("    subscription_update_if_due\n");
     print("                            Update subscription proxies only when per-rule intervals have elapsed\n");
     print("    check_proxy             Check proxy connectivity\n");
@@ -143,8 +145,10 @@ function command_spec(command) {
         subscription_update: [ "components/updates.uc", "subscription-update", 2 ],
         subscription_update_async: [ "components/updates.uc", "subscription-update-async", 2 ],
         subscription_update_status: [ "components/updates.uc", "subscription-update-status", 1 ],
+        subscription_update_report: [ "subscription/cache.uc", "change-report", 0 ],
         subscription_update_if_due: [ "components/updates.uc", "subscription-update-if-due", 0 ],
         check_proxy: [ "diagnostics/runtime.uc", "check-proxy", 0 ],
+        check_service: [ "diagnostics/runtime.uc", "check-service", 2 ],
         check_nft: [ "diagnostics/runtime.uc", "check-nft", 0 ],
         check_nft_rules: [ "diagnostics/runtime.uc", "check-nft-rules", 0 ],
         check_sing_box: [ "diagnostics/runtime.uc", "check-sing-box", 0 ],

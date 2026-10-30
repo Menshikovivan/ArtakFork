@@ -50,6 +50,7 @@ export namespace Forkop {
   // global_check            Run global system check
 
   export enum AvailableMethods {
+    CHECK_SERVICE = 'check_service',
     CHECK_DNS_AVAILABLE = 'check_dns_available',
     CHECK_FAKEIP = 'check_fakeip',
     CHECK_NFT_RULES = 'check_nft_rules',
@@ -108,6 +109,13 @@ export namespace Forkop {
     runtimeAvailable?: boolean;
     urlTestInfo?: UrlTestInfo;
     priorityInfo?: PriorityInfo;
+  }
+
+  export interface ServiceCheckResult {
+    success: boolean;
+    service?: string;
+    tag?: string;
+    error?: string;
   }
 
   export interface UrlTestMember {

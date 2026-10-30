@@ -1577,6 +1577,21 @@ msgstr "Группа серверов для автоматического вы
 msgid "Server group for priority failover"
 msgstr "Группа автоматически выбирает рабочий узел на основе установленного приоритета."
 
+msgid "Add priority levels for a primary and backup server. Each level uses only its selected servers; direct traffic is used only when explicitly enabled for a level."
+msgstr "Добавьте уровни для основного и резервного сервера. Каждый уровень использует только выбранные серверы; прямое соединение включается отдельно."
+
+msgid "No usable servers remain in URLTest group %s of section %s. Check the selection filter or configure a priority group with a backup server."
+msgstr "В группе URLTest %s секции %s не осталось доступных для выбора серверов. Проверьте фильтр или настройте группу приоритета с резервным сервером."
+
+msgid "Filter mode: %s."
+msgstr "Режим фильтра: %s."
+
+msgid "Available servers: %s."
+msgstr "Доступные для выбора серверы: %s."
+
+msgid "No server names are available to display."
+msgstr "Нет имён серверов для отображения."
+
 msgid "Server outbound must contain a non-empty server field"
 msgstr "Серверный outbound должен содержать непустое поле server"
 
@@ -2356,3 +2371,69 @@ msgstr "Обновление подписки: ошибка восстановл
 
 msgid "Section: %s"
 msgstr "Раздел: %s"
+
+msgid "Check service"
+msgstr "Проверить сервис"
+
+msgid "Checking HTTPS connection…"
+msgstr "Проверка HTTPS-соединения…"
+
+msgid "HTTPS response received through the selected proxy. HTTP status, region and sign-in are not verified."
+msgstr "HTTPS-ответ получен через выбранный прокси. HTTP-статус, регион и вход в аккаунт не проверены."
+
+msgid "Check failed. The node, TLS connection or service may be unavailable."
+msgstr "Проверка не удалась. Узел, TLS-соединение или сервис могут быть недоступны."
+
+msgid "The check uses the selected node or the currently active node in the selected group."
+msgstr "Проверка использует выбранный узел или активный узел выбранной группы."
+
+msgid "An HTTPS response can include an error or access restriction; this does not test your account or all service endpoints."
+msgstr "HTTPS-ответ может содержать ошибку или ограничение доступа; проверка не проверяет ваш аккаунт и все адреса сервиса."
+
+msgid "Subscription update report"
+msgstr "Отчёт об обновлении подписки"
+
+msgid "Rule"
+msgstr "Правило"
+
+msgid "First import; no previous snapshot to compare"
+msgstr "Первый импорт; предыдущей версии для сравнения нет"
+
+msgid "Added"
+msgstr "Добавлены"
+
+msgid "Removed"
+msgstr "Удалены"
+
+msgid "Renamed"
+msgstr "Переименован"
+
+msgid "Connection settings changed"
+msgstr "Изменены параметры подключения"
+
+msgid "Skipped entries"
+msgstr "Пропущено записей"
+
+msgid "Unsupported protocol"
+msgstr "Неподдерживаемый протокол"
+
+msgid "Missing protocol"
+msgstr "Не указан протокол"
+
+msgid "Invalid or unsupported parameters"
+msgstr "Некорректные или неподдерживаемые параметры"
+
+msgid "Detailed skip reason is unavailable for this format"
+msgstr "Для этого формата подробная причина пропуска недоступна"
+
+msgid "No proxy changes"
+msgstr "Изменений узлов нет"
+
+msgid "Source update failed; see the log for details"
+msgstr "Не удалось обновить источник; подробности в журнале"
+
+msgid "Update completed. The report shows downloaded subscription data; individual sources may have failed."
+msgstr "Обновление завершено. Отчёт показывает полученные данные; отдельные источники могли завершиться ошибкой."
+
+msgid "Update failed. The report shows downloaded data, which may not have been applied."
+msgstr "Обновление завершилось ошибкой. Отчёт показывает полученные данные, которые могли не примениться."

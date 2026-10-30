@@ -60,6 +60,16 @@ jobs:
             -L "$GITHUB_WORKSPACE/forkop/files/usr/lib/*.uc" \
             tests/subscription_source_entry.uc
 
+      - name: Test service checks and subscription change reports
+        shell: bash
+        run: |
+          set -euo pipefail
+          for test in tests/service_check.uc tests/subscription_change_report.uc; do
+            "$RUNNER_TEMP/ucode-build/ucode" \
+              -L "$RUNNER_TEMP/ucode-build/*.so" \
+              -L "$GITHUB_WORKSPACE/forkop/files/usr/lib/*.uc" "$test"
+          done
+
       - name: Test list cache ownership and transactional rollback
         shell: bash
         run: |
@@ -75,3 +85,5 @@ jobs:
           export PATH="$RUNNER_TEMP/ucode-bin:$PATH"
           bash tests/list_cache.sh
           bash tests/google_gemini_inline.sh
+          bash tests/urltest_empty_groups.sh
+          bash tests/priority_reserve.sh

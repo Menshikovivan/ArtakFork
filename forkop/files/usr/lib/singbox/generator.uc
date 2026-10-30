@@ -7,6 +7,7 @@ let uci_core = require("core.uci");
 let runtime_constants = require("singbox.constants");
 let cache_identity = require("singbox.cache_identity");
 let filter_selection = require("subscription.filter_selection");
+let change_report = require("subscription.change_report");
 // Keep private connection identities out of outboundMetadata/UI caches.
 let subscription_filter_connections = {};
 let runtime_country = require("singbox.country");
@@ -1439,6 +1440,23 @@ function priority_outbound_tag(section_name, group_id) {
     return outbound_tag(section_name + "-priority-" + as_string(group_id));
 }
 
+// Report only display names, never proxy URLs or outbound contents. JSON escaping
+// keeps provider-supplied names from injecting extra log lines.
+function empty_urltest_details(section, urltest_id, candidate_tags, state) {
+    let names = object_or_empty(object_or_empty(state.outboundMetadata).names);
+    let available = [];
+    for (let tag in array_or_empty(candidate_tags)) {
+        let name = as_string(names[tag] || "");
+        if (name == "")
+            continue;
+        name = change_report.safe_name(name);
+        if (!contains(available, name) && length(available) < 8)
+            push(available, name);
+    }
+    return "; filter mode: " + as_string(connections.urltest_filter_mode(section, urltest_id)) +
+        "; available server names: " + sprintf("%J", available);
+}
+
 function add_urltest_outbound(config, section, urltest_id, urltest_candidate_tags, state) {
     let section_name = section[".name"];
     let urltest_outbounds = urltest_filtered_outbounds(section, urltest_id, urltest_candidate_tags, state);
@@ -1470,7 +1488,8 @@ function add_urltest_outbound(config, section, urltest_id, urltest_candidate_tag
     });
 
     if (length(urltest_outbounds) == 0)
-        runtime_generate_unsupported("URLTest group '" + display_name + "' in rule '" + section_name + "' has no usable proxy outbounds after filtering");
+        runtime_generate_unsupported("URLTest group '" + display_name + "' in rule '" + section_name + "' has no usable proxy outbounds after filtering" +
+            empty_urltest_details(section, urltest_id, urltest_candidate_tags, state));
 
     push(config.outbounds, urltest_outbound);
     return {

@@ -40,6 +40,43 @@ fi
 grep -Fq "URLTest group 'Empty URLTest'" "$WORK_DIR/urltest-empty.out" "$WORK_DIR/urltest-empty.err" &&
   grep -Fq 'has no usable proxy outbounds after filtering' "$WORK_DIR/urltest-empty.out" "$WORK_DIR/urltest-empty.err" ||
   fail "empty URLTest did not report the fail-closed reason"
+grep -Fq 'filter mode: include' "$WORK_DIR/urltest-empty.out" "$WORK_DIR/urltest-empty.err" &&
+  grep -Fq 'Only leaf' "$WORK_DIR/urltest-empty.out" "$WORK_DIR/urltest-empty.err" ||
+  fail "empty URLTest did not report its filter and available server name"
+if grep -Fq '00000000-0000-4000-8000-000000000001' "$WORK_DIR/urltest-empty.out" "$WORK_DIR/urltest-empty.err"; then
+  fail "empty URLTest diagnostics exposed a proxy credential"
+fi
+
+# Provider-supplied labels can themselves contain credentials or addresses.
+cat >"$WORK_DIR/urltest-private-names.json" <<'JSON'
+{
+  "settings": { ".name": "settings", ".type": "settings" },
+  "section": [{
+    ".name": "proxy", ".type": "section", "enabled": "1", "action": "connection",
+    "selector_proxy_links": [
+      "vless://00000000-0000-4000-8000-000000000001@edge.example:443?encryption=none&security=tls&sni=edge.example&type=ws#12345678-1234-1234-1234-123456789abc",
+      "vless://00000000-0000-4000-8000-000000000002@edge.example:443?encryption=none&security=tls&sni=edge.example&type=ws#token-Private123",
+      "vless://00000000-0000-4000-8000-000000000003@edge.example:443?encryption=none&security=tls&sni=edge.example&type=ws#192.0.2.45",
+      "vless://00000000-0000-4000-8000-000000000004@edge.example:443?encryption=none&security=tls&sni=edge.example&type=ws#DE%20backup"
+    ]
+  }],
+  "urltest": [{
+    ".name": "ut_private", ".type": "urltest", "section": "proxy", "name": "Filtered",
+    "filter_mode": "include", "include_regex": ["^does-not-match$"]
+  }]
+}
+JSON
+if generate "$WORK_DIR/urltest-private-names.json" "$WORK_DIR/urltest-private-config.json" >"$WORK_DIR/private.out" 2>"$WORK_DIR/private.err"; then
+  fail "URLTest with zero usable leaves was accepted"
+fi
+grep -Fq '[name hidden]' "$WORK_DIR/private.out" "$WORK_DIR/private.err" &&
+  grep -Fq 'DE backup' "$WORK_DIR/private.out" "$WORK_DIR/private.err" ||
+  fail "URLTest diagnostics did not mask sensitive names or preserve a safe name"
+for secret in '12345678-1234-1234-1234-123456789abc' 'token-Private123' '192.0.2.45'; do
+  if grep -Fq "$secret" "$WORK_DIR/private.out" "$WORK_DIR/private.err"; then
+    fail "URLTest diagnostics exposed a sensitive candidate name"
+  fi
+done
 
 cat >"$WORK_DIR/priority-empty.json" <<'JSON'
 {

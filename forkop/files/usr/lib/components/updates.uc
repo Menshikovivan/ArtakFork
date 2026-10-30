@@ -2122,7 +2122,9 @@ function launch_subscription_worker(args) {
 }
 
 function subscription_update_worker(state_file, output_file, section, source_index) {
-    let status = command_status(command_from_args([
+    let state_match = match(as_string(state_file), /\/([^\/]+)\.json$/);
+    let report_job_id = state_match && valid_subscription_job_id(state_match[1]) ? state_match[1] : "";
+    let status = command_status(command_env({ FORKOP_SUBSCRIPTION_REPORT_JOB_ID: report_job_id }) + " " + command_from_args([
         BIN_PATH,
         "subscription_update",
         as_string(section),

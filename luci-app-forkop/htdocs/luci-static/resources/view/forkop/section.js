@@ -7241,7 +7241,7 @@ function createSectionContent(section) {
     ButtonAddSettingsDynamicList,
     "priority_group",
     _("Priority"),
-    _("Server group for priority failover"),
+    _("Add priority levels for a primary and backup server. Each level uses only its selected servers; direct traffic is used only when explicitly enabled for a level."),
   );
   o.depends("action", "connection");
   o.rmempty = true;
