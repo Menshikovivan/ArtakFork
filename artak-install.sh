@@ -115,7 +115,7 @@ if [ "$AWG_SUPPORTED" = 1 ]; then
         # normal config reload. Run restart in a HUP-immune detached process:
         # SSH and Wi-Fi can drop before it finishes.
         AWG_RESTART_LOCK=/tmp/artak-awg-netifd-restart.lock
-        mkdir "$AWG_RESTART_LOCK" 2>/dev/null || fail 'AWG network restart is already pending; inspect /tmp/artak-awg-netifd-restart.log.'
+        mkdir "$AWG_RESTART_LOCK" 2>/dev/null || fail 'AWG network restart is already pending; inspect /root/artakfork-backups/awg-network-restart.log.'
         AWG_RESTART_JOB=$(mktemp /tmp/artak-awg-netifd-restart.XXXXXX) || { rmdir "$AWG_RESTART_LOCK"; fail 'Could not create AWG restart job.'; }
         chmod 700 "$AWG_RESTART_JOB"
         cat > "$AWG_RESTART_JOB" <<'AWG_RESTART_SCRIPT'
@@ -147,8 +147,8 @@ echo 'ArtakFork: AWG handler did not become available; Forkop was not started.'
 exit 1
 AWG_RESTART_SCRIPT
         echo 'ArtakFork: AWG requires a network restart. SSH and Wi-Fi may disconnect briefly; the job continues automatically.'
-        echo 'Progress log: /tmp/artak-awg-netifd-restart.log'
-        (trap '' HUP; exec /bin/sh "$AWG_RESTART_JOB") </dev/null >/tmp/artak-awg-netifd-restart.log 2>&1 &
+        echo 'Progress log: /root/artakfork-backups/awg-network-restart.log'
+        (trap '' HUP; exec /bin/sh "$AWG_RESTART_JOB") </dev/null >"$BACKUP_DIR/awg-network-restart.log" 2>&1 &
         echo "ArtakFork $VERSION installed; network restart scheduled. Backup: $BACKUP_PATH"
         exit 0
     fi

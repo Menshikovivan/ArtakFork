@@ -129,7 +129,7 @@ cp "/fixtures/${3##*/}" "$2"
         result = self.run_installer()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn('SSH and Wi-Fi may disconnect', result.stdout)
-        log = self.root / 'tmp/artak-awg-netifd-restart.log'
+        log = self.root / 'root/artakfork-backups/awg-network-restart.log'
         for _ in range(100):
             if log.exists() and 'AWG handler is available' in log.read_text(): break
             time.sleep(.05)
@@ -145,7 +145,7 @@ cp "/fixtures/${3##*/}" "$2"
         result = self.run_installer()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         for _ in range(100):
-            p = self.root / 'tmp/artak-awg-netifd-restart.log'
+            p = self.root / 'root/artakfork-backups/awg-network-restart.log'
             if p.exists() and 'network restart failed' in p.read_text(): break
             time.sleep(.05)
         self.assertIn('network:restart', self.events())
@@ -157,7 +157,7 @@ cp "/fixtures/${3##*/}" "$2"
         (self.root / 'network-preserve').touch()
         result = self.run_installer()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        p = self.root / 'tmp/artak-awg-netifd-restart.log'
+        p = self.root / 'root/artakfork-backups/awg-network-restart.log'
         for _ in range(100):
             if p.exists() and 'handler did not become available' in p.read_text(): break
             time.sleep(.05)
