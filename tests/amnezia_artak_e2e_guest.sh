@@ -61,6 +61,15 @@ printf '[Interface]\nPrivateKey = %s\nAddress = 10.88.1.1/32\nListenPort = 29001
 ucode -e 'let f=require("fs");let c=f.readfile("/tmp/e2e.conf");if(f.writefile("/tmp/e2e-request",sprintf("%J",{config:c,section:"e2etest"}))==null)exit(1);'
 
 echo 'E2E stage: invoke actual rpcd import'
+# Disposable VM only: capture verifier result categories before cleanup.
+# No profile values, peer keys, or exception text are recorded.
+ucode -e '
+let f=require("fs"), p="/usr/lib/forkop/subscription/amnezia_manual_activate.uc", s=f.readfile(p);
+let needle="            return type(u) == ";
+if (type(s)!="string" || index(s,needle)<0) exit(1);
+let injected="            require(\"fs\").writefile(\"/tmp/e2e-verify\", sprintf(\"uci=%J live=%J uci_error=%J live_error=%J\",u?.ok,live?.ok,u?.error,live?.error));" + "\n";
+if (f.writefile(p,replace(s,needle,injected+needle))==null) exit(1);
+'
 ucode -L /usr/lib/forkop -e 'let f=require("fs");print(sprintf("feature=%J runtime_dir=%J reload_lock=%J subscription_lock=%J forkop_pending=%J network_pending=%J\n",require("subscription.amnezia_feature").enabled(), f.stat("/var/run/forkop")?.type, f.stat("/var/run/forkop.reload.lock")?.type, f.stat("/var/run/forkop/subscription-update.lock")?.type, f.stat("/tmp/.uci/forkop")?.type, f.stat("/tmp/.uci/network")?.type));'
 ubus call luci.artak_awg import_conf "$(cat /tmp/e2e-request)" >/tmp/e2e-result
 test "$(jsonfilter -i /tmp/e2e-result -e '@.ok')" = true
@@ -74,6 +83,7 @@ while :; do
 done
 if [ "$state" != done ]; then
     echo "import failed: $state" >&2
+    cat /tmp/e2e-verify 2>/dev/null || echo 'verification callback did not run'
     echo 'E2E stage: retry isolated worker for sanitized result'
     ucode -L /usr/lib/forkop -e 'let f=require("fs"), w=require("subscription.amnezia_manual_worker");let r=w.run(f.readfile("/tmp/e2e.conf"),"e2etest");print(sprintf("worker ok=%J error=%J cleanup_required=%J\n",r?.ok,r?.error,r?.cleanup_required));' || :
     ucode -L /usr/lib/forkop -e 'let a=require("subscription.amnezia_allocate"), c=require("uci").cursor(), r=a.choose(c,{});print(sprintf("allocator ok=%J error=%J\n",r?.ok,r?.error));let k=require("subscription.amnezia_runtime_check").check("15001","16002");print(sprintf("kernel check ok=%J error=%J\n",k?.ok,k?.error));let m=require("subscription.amnezia_mark_audit").audit([0x18003a99],{});print(sprintf("mark audit ok=%J error=%J\n",m?.ok,m?.error));' || :
