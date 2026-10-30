@@ -20,7 +20,9 @@ expect(!routes.prepare('afawg_a', '254', '1000', true, false).ok, 'Unsafe table'
 expect(!routes.prepare('afawg_a', '16866', '105', true, false).ok, 'Unsafe priority');
 expect(!routes.prepare('afawg_a', '16866', '1000', false, false).ok, 'No families');
 let plan = routes.prepare('afawg_a', '16866', '1000', true, true);
-expect(plan.ok && length(plan.entries) == 6 && plan.entries[0].options.target == '0.0.0.0/0', 'Bad route plan');
+expect(plan.ok, sprintf('Route plan rejected: %s; boolean type: %s', plan.error, type(true)));
+expect(length(plan.entries) == 6, sprintf('Unexpected route count: %d', length(plan.entries)));
+expect(plan.entries[0].options.target == '0.0.0.0/0', sprintf('Unexpected first route target: %s', plan.entries[0].options.target));
 sections.other = { '.type': 'rule', priority: '1001', lookup: '252' };
 expect(!routes.stage_new(cursor, 'afawg_a', '16866', '1000', true, false).ok, 'Priority collision');
 delete sections.other;

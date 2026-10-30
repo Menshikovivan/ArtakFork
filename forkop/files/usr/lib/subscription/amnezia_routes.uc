@@ -7,7 +7,7 @@ function prepare(name, table, priority, ipv4, ipv6) {
         type(table) != 'string' || !match(table, /^[0-9]{1,5}$/) ||
         type(priority) != 'string' || !match(priority, /^[0-9]{1,5}$/) ||
         +table < 10000 || +table > 30000 || +priority < 1000 || +priority > 29999 ||
-        type(ipv4) != 'boolean' || type(ipv6) != 'boolean' || (!ipv4 && !ipv6))
+        type(ipv4) != 'bool' || type(ipv6) != 'bool' || (!ipv4 && !ipv6))
         return { ok: false, error: 'Invalid private route request' };
     let entries = [];
     for (let family in [4, 6]) {
