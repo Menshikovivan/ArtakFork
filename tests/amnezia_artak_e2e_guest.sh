@@ -76,6 +76,9 @@ if [ "$state" != done ]; then
     echo 'E2E stage: retry isolated worker for sanitized result'
     ucode -L /usr/lib/forkop -e 'let f=require("fs"), w=require("subscription.amnezia_manual_worker");let r=w.run(f.readfile("/tmp/e2e.conf"),"e2etest");print(sprintf("worker ok=%J error=%J cleanup_required=%J\n",r?.ok,r?.error,r?.cleanup_required));' || :
     ucode -L /usr/lib/forkop -e 'let a=require("subscription.amnezia_allocate"), c=require("uci").cursor(), r=a.choose(c,{});print(sprintf("allocator ok=%J error=%J\n",r?.ok,r?.error));let k=require("subscription.amnezia_runtime_check").check("15001","16002");print(sprintf("kernel check ok=%J error=%J\n",k?.ok,k?.error));let m=require("subscription.amnezia_mark_audit").audit([0x18003a99],{});print(sprintf("mark audit ok=%J error=%J\n",m?.ok,m?.error));' || :
+    command -v timeout || echo 'timeout command missing'
+    timeout 3 ip -j -N -4 rule show || echo "timeout ip failed: $?"
+    timeout 3 nft -j list ruleset >/dev/null || echo "timeout nft failed: $?"
     ubus call network get_proto_handlers 2>/dev/null | grep -o '"amneziawg"' || :
     logread | grep -E 'netifd|forkop|rpcd' | tail -35 | sed -E 's/[A-Za-z0-9+\/]{42,43}=/[REDACTED]/g' || :
     exit 1
