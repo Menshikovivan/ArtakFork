@@ -3,9 +3,6 @@
 set -eu
 umask 077
 [ "${ARTAK_DISPOSABLE_VM:-}" = 1 ] || exit 1
-apk add kmod-wireguard wireguard-tools >/dev/null
-modprobe wireguard
-ip netns add wg-interop
 cleanup() {
     ifdown atw 2>/dev/null || :
     ip netns del wg-interop 2>/dev/null || :
@@ -13,8 +10,19 @@ cleanup() {
     uci -q delete network.atwp || :
     uci commit network
     rm -f /tmp/wgi-a /tmp/wgi-b /tmp/wgi-apub /tmp/wgi-bpub
+    /etc/init.d/firewall start 2>/dev/null || :
 }
 trap cleanup EXIT
+# The isolated VM uses LAN as its temporary QEMU package uplink. netifd
+# reloads can recreate rejecting fw4 chains even after the provisioner stops
+# the firewall, so clear them only inside this explicitly disposable VM.
+/etc/init.d/firewall stop
+nft flush ruleset
+ip addr replace 10.0.2.15/24 dev br-lan
+ip route replace default via 10.0.2.2 dev br-lan
+apk add kmod-wireguard wireguard-tools >/dev/null
+modprobe wireguard
+ip netns add wg-interop
 awg genkey >/tmp/wgi-a
 wg genkey >/tmp/wgi-b
 awg pubkey </tmp/wgi-a >/tmp/wgi-apub
