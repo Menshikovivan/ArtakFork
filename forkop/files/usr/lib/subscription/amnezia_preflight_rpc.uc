@@ -3,10 +3,10 @@ let fs = require("fs");
 let parser = require("subscription.amnezia_conf");
 function reply(value) { print(sprintf("%J\n", value)); }
 if (ARGV[0] == "list") {
-    reply({ preflight: { config: "" } });
+    reply({ preflight: { config: "" }, import_conf: { config: "" } });
     exit(0);
 }
-if (ARGV[0] != "call" || ARGV[1] != "preflight") exit(1);
+if (ARGV[0] != "call" || (ARGV[1] != "preflight" && ARGV[1] != "import_conf")) exit(1);
 let input = fs.open("/dev/stdin", "r");
 if (!input) { reply({ ok: false, error: "Request unavailable" }); exit(0); }
 let body = input.read(1048577);
@@ -18,6 +18,14 @@ if (type(request) != "object" || type(request.config) != "string" || length(requ
     reply({ ok: false, error: "Invalid or oversized configuration" }); exit(0);
 }
 try {
+    if (ARGV[1] == "import_conf") {
+        let importer = require("subscription.amnezia_rpc_import");
+        let uci = require("uci");
+        let checker = require("subscription.amnezia_runtime_check");
+        let backend = require("subscription.amnezia_apply");
+        reply(importer.apply(request.config, { cursor: function() { return uci.cursor(); }, check: checker.check, apply: backend.apply }));
+        exit(0);
+    }
     let result = parser.parse_conf(request.config);
     if (!result.ok) { reply({ ok: false, error: result.error }); exit(0); }
     reply({ ok: true, peer_count: length(result.peers) });

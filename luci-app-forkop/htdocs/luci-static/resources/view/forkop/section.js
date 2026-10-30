@@ -16,6 +16,9 @@ const awgPreflightRpc = rpc.declare({
   method: "preflight",
   params: ["config"],
 });
+const awgImportRpc = rpc.declare({
+  object: "luci.artak_awg", method: "import_conf", params: ["config"],
+});
 
 function showAmneziaPreflight() {
   const limit = 262144;
@@ -49,6 +52,36 @@ function showAmneziaPreflight() {
     E("p", {}, "Черновая проверка формата 2.0 и 3.1. Она не импортирует файл, не создаёт интерфейс и не проверяет подключение."),
     E("p", {}, "Файл содержит приватный ключ и отправляется на роутер. Для защиты передачи используйте LuCI по HTTPS."),
     input, status, check,
+    E("button", { type: "button", class: "btn", click: () => ui.hideModal() }, "Закрыть"),
+  ]);
+}
+function showAmneziaImport() {
+  const input = E("input", { type: "file", accept: ".conf,text/plain" });
+  const status = E("p", { role: "status" }, "Выберите файл размером до 64 КиБ.");
+  const action = E("button", { type: "button", class: "btn cbi-button cbi-button-action", disabled: true }, "Создать интерфейс");
+  input.addEventListener("change", () => {
+    const file = input.files && input.files[0];
+    action.disabled = !file || file.size > 65536;
+    status.textContent = file && file.size > 65536 ? "Файл слишком большой." : "Файл готов к импорту.";
+  });
+  action.addEventListener("click", async () => {
+    const file = input.files && input.files[0];
+    if (!file || file.size > 65536) return;
+    action.disabled = true;
+    status.textContent = "Создание и проверка соединения…";
+    try {
+      const result = await awgImportRpc(await file.text());
+      status.textContent = result && result.ok ?
+        "Интерфейс создан: " + result.name + ". Добавьте его в настройку соединения Forkop." :
+        "Импорт не завершён. Проверьте интерфейсы и журнал роутера перед повторной попыткой.";
+    } catch (_error) {
+      status.textContent = "Ответ не получен. Перед повторной попыткой проверьте состояние интерфейсов роутера.";
+    } finally { input.value = ""; action.disabled = true; }
+  });
+  ui.showModal("Экспериментальный импорт AmneziaWG", [
+    E("p", {}, "Импорт создаёт сетевой интерфейс и перезагружает настройки сети; связь может временно прерваться. Перед запуском примените или отмените все несохранённые изменения LuCI."),
+    E("p", {}, "Файл содержит приватный ключ. Для защиты передачи используйте LuCI по HTTPS."),
+    input, status, action,
     E("button", { type: "button", class: "btn", click: () => ui.hideModal() }, "Закрыть"),
   ]);
 }
@@ -7198,6 +7231,11 @@ function createSectionContent(section) {
   o.inputtitle = "Проверить .conf";
   o.inputstyle = "action";
   o.onclick = showAmneziaPreflight;
+  o = section.taboption("settings", form.Button, "_amnezia_import", "Импорт AmneziaWG .conf", "Экспериментальный импорт одного подключения.");
+  o.inputtitle = "Импортировать файл";
+  o.inputstyle = "action";
+  o.depends("action", "connection");
+  o.onclick = showAmneziaImport;
 
   o = section.taboption(
     "settings",

@@ -65,7 +65,8 @@
     "write": {
       "ubus": {
         "luci.artak_awg": [
-          "preflight"
+          "preflight",
+          "import_conf"
         ]
       },
       "file": {
