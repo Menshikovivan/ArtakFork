@@ -71,11 +71,11 @@ let injected="            let rr=require(\"subscription.amnezia_activate\").run;
 if (f.writefile(p,replace(s,needle,injected+needle))==null) exit(1);
 '
 ucode -L /usr/lib/forkop -e 'let f=require("fs");print(sprintf("feature=%J runtime_dir=%J reload_lock=%J subscription_lock=%J forkop_pending=%J network_pending=%J\n",require("subscription.amnezia_feature").enabled(), f.stat("/var/run/forkop")?.type, f.stat("/var/run/forkop.reload.lock")?.type, f.stat("/var/run/forkop/subscription-update.lock")?.type, f.stat("/tmp/.uci/forkop")?.type, f.stat("/tmp/.uci/network")?.type));'
-ubus call luci.artak_awg import_conf "$(cat /tmp/e2e-request)" >/tmp/e2e-result
-test "$(jsonfilter -i /tmp/e2e-result -e '@.ok')" = true
+ubus call luci.artak_awg import_conf "$(cat /tmp/e2e-request)" >/tmp/e2e-result || { echo 'ubus import_conf call failed' >&2; exit 1; }
+test "$(jsonfilter -i /tmp/e2e-result -e '@.ok')" = true || { echo "import_conf rejected: $(jsonfilter -i /tmp/e2e-result -e '@.error')" >&2; exit 1; }
 count=0
 while :; do
-    ubus call luci.artak_awg import_status '{}' >/tmp/e2e-status
+    ubus call luci.artak_awg import_status '{}' >/tmp/e2e-status || { echo 'ubus import_status call failed' >&2; exit 1; }
     state=$(jsonfilter -i /tmp/e2e-status -e '@.state')
     [ "$state" != running ] && break
     count=$((count+1)); [ "$count" -lt 120 ] || { echo 'import timed out' >&2; exit 1; }
