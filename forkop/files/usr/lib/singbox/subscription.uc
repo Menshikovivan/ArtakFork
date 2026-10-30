@@ -374,13 +374,24 @@ function source_cache_is_current(source_section, source_entry, expected_user_age
 function awg_source_identity(source_section, source_entry, expected_user_agent, expected_hwid, private_dir) {
     if (type(source_section) != 'string' || !match(source_section, /^[A-Za-z0-9_-]{1,100}$/))
         return null;
-    if (!source_cache_is_current(source_section, source_entry, expected_user_agent, expected_hwid))
-        return null;
-    let url = file_first_line(TMP_SUBSCRIPTION_FOLDER + '/' + source_section + '.url');
-    let ua = file_first_line(TMP_SUBSCRIPTION_FOLDER + '/' + source_section + '.user_agent');
-    let hwid = file_first_line(source_hwid_path(source_section));
+    let url, ua, hwid, status = null;
+    if (source_cache_is_current(source_section, source_entry, expected_user_agent, expected_hwid)) {
+        url = file_first_line(TMP_SUBSCRIPTION_FOLDER + '/' + source_section + '.url');
+        ua = file_first_line(TMP_SUBSCRIPTION_FOLDER + '/' + source_section + '.user_agent');
+        hwid = file_first_line(source_hwid_path(source_section));
+    } else {
+        let status_dir = getenv('FORKOP_AWG_STATUS_DIR') || '/etc/forkop/awg-subscription-status';
+        status = require('subscription.amnezia_status').read(status_dir, source_section);
+        let parsed = parse_source_entry(source_entry);
+        if (status == null || status.url != parsed.url) return null;
+        let requested_ua = as_string(expected_user_agent || parsed.user_agent || '');
+        if (requested_ua != '' && requested_ua != status.user_agent) return null;
+        if (!hwid_matches_config(expected_hwid, status.hwid)) return null;
+        url = status.url; ua = status.user_agent; hwid = status.hwid;
+    }
     if (url == '') return null;
-    return require('subscription.amnezia_identity').calculate(private_dir, source_section, url, ua, hwid);
+    let identity = require('subscription.amnezia_identity').calculate(private_dir, source_section, url, ua, hwid);
+    return status != null && status.identity != identity ? null : identity;
 }
 
 function source_json_path(source_section) {

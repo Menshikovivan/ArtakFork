@@ -10,6 +10,7 @@ let restore = require('subscription.amnezia_restore');
 let source_identity = require('subscription.amnezia_identity');
 let runtime_subscription = require('singbox.subscription');
 let snapshot = require('subscription.amnezia_snapshot');
+let status = require('subscription.amnezia_status');
 function expect(v, message) { if (!v) die('FAIL: ' + message + '\n'); }
 let dir = ARGV[0];
 let identity_a = source_identity.calculate(dir, 'test', 'https://example.invalid/sub', 'agent', 'device');
@@ -34,6 +35,8 @@ let vpn = 'vpn://' + b64enc(good);
 let badvpn = 'vpn://' + b64enc(bad);
 let mixed = b64enc('vless://test.invalid\n' + vpn + '\n');
 expect(subscription.validated(mixed).ok, 'valid mixed feed rejected');
+expect(subscription.only_awg(vpn) && subscription.only_awg(b64enc(vpn)), 'AWG-only feed not recognised');
+expect(!subscription.only_awg(mixed) && !subscription.only_awg(vpn + '\n' + badvpn), 'mixed or invalid feed marked AWG-only');
 expect(!subscription.validated(vpn + '\n' + badvpn).ok, 'unsafe mixed feed accepted');
 expect(fs.writefile(dir + '/synthetic-feed', mixed) != null, 'test feed write failed');
 expect(main_parser.parse_amnezia_subscription_file(dir + '/synthetic-feed').ok, 'main parser entry failed');
@@ -88,6 +91,15 @@ let build_opts = {
 let built = snapshot.build(snapshot_dir, dir, active_dir, [{ source: 'rule_2', identity: id }], null, 1000, [], build_opts);
 expect(built != null && built.entries[0].mark == snapshot_entry.mark, 'verified entries not assembled into snapshot');
 expect(snapshot.build(snapshot_dir, dir, active_dir, [{ source: 'rule_2', identity: id }], null, 1000, [snapshot_entry.mark], build_opts) == null, 'occupied mark accepted');
+expect(store.save(dir, 'fixture2', identity_a, vpn), 'status candidate save failed');
+let status_revision = store.revision(dir, 'fixture2', identity_a);
+let good_dir = dir + '/status-good';
+expect(store.promote(dir, good_dir, 'fixture2', identity_a, status_revision), 'status good promotion failed');
+expect(active.save(active_dir, 'fixture2', identity_a, status_revision,
+    [{ index: 0, name: 'afawg_a1', table: '10001', priority: '1000' }], function() { return true; }), 'status manifest failed');
+expect(status.save(ARGV[2], active_dir, good_dir, 'fixture2', 'https://example.invalid/sub', 'agent', 'device', identity_a, status_revision), 'AWG-only status save failed');
+expect(runtime_subscription.awg_source_identity('fixture2', 'https://example.invalid/sub', 'agent', 'device', dir) == identity_a, 'AWG-only status not restored');
+expect(runtime_subscription.awg_source_identity('fixture2', 'https://example.invalid/other', 'agent', 'device', dir) == null, 'changed AWG-only source accepted');
 let manifest = { dir: active_dir, revision: revision, verify: function(e) { return e.name == 'afawg_a1'; } };
 let stale_manifest = { dir: active_dir, revision: other, verify: manifest.verify };
 expect(!candidate_apply.apply_one_and_record(dir, 'rule_2', id, 1, allocation[0], 1000, { apply_driver: fake_apply }, stale_manifest).ok && called == 1, 'stale revision reached runtime');
@@ -140,7 +152,13 @@ let not_ready = candidate_apply.activate(dir, activate_dir, 'rule_2', id, 0, all
 expect(!not_ready.ok && !not_ready.cleanup_required && cleaned, 'unverified candidate was not rolled back');
 activate_opts.live_check = function() { return { ok: true }; };
 activate_opts.choose = function() { return { ok: true, name: 'afawg_a1', table: '10001', priority: '1000' }; };
+activate_opts.with_lock = function(options, callback) { return callback({ apply: fake_apply, cleanup: successful_cleanup }); };
 expect(candidate_apply.allocate_and_activate(dir, activate_dir, 'rule_2', id, 0, 1000, activate_opts).ok, 'allocated candidate was not activated');
+fs.unlink(activate_dir + '/rule_2.json');
+activate_opts.publish = function() { return false; };
+cleaned = false;
+let publish_failure = candidate_apply.allocate_and_activate(dir, activate_dir, 'rule_2', id, 0, 1000, activate_opts);
+expect(!publish_failure.ok && !publish_failure.cleanup_required && cleaned && fs.stat(activate_dir + '/rule_2.json') == null, 'status publish failure did not roll back');
 let two = [
     { name: 'afawg_a1', table: '10001', priority: '1000' },
     { name: 'afawg_a2', table: '10002', priority: '1002' }

@@ -917,7 +917,7 @@ function add_subscription_source_with_state(config, section, source_index, sourc
         connections.subscription_user_agent(section, source_entry),
         connections.subscription_hwid(section, source_entry)
     ))
-        return 0;
+        return add_awg_subscription_source(config, section, source_section, source_entry, taken, selector_tags, urltest_candidate_tags, state);
 
     let source_outbounds = runtime_subscription.read_source_outbounds(source_section);
     source_outbounds = subscription_exclude_regex_outbounds(

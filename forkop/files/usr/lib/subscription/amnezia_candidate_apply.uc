@@ -113,13 +113,36 @@ function activate(dir, active_dir, source, identity, index, allocation, timeout_
 
 function allocate_and_activate(dir, active_dir, source, identity, index, timeout_ms, opts) {
     opts = type(opts) == 'object' ? opts : {};
-    let cursor = opts.cursor || require('uci').cursor();
-    if (!cursor || cursor.load('network') == null) return { ok: false, error: 'Cannot inspect network configuration' };
-    let choose = type(opts.choose) == 'function' ? opts.choose : require('subscription.amnezia_allocate').choose;
-    let allocation;
-    try { allocation = choose(cursor, opts); } catch (e) { return { ok: false, error: 'Cannot allocate AWG resources' }; }
-    if (type(allocation) != 'object' || allocation.ok !== true)
-        return { ok: false, error: 'Cannot allocate AWG resources' };
-    return activate(dir, active_dir, source, identity, index, allocation, timeout_ms, opts);
+    let with_lock = type(opts.with_lock) == 'function' ? opts.with_lock : require('subscription.amnezia_apply').with_lock;
+    return with_lock(opts, function(lease) {
+        let cursor = opts.cursor || require('uci').cursor();
+        if (!cursor || cursor.load('network') == null) return { ok: false, error: 'Cannot inspect network configuration' };
+        let choose = type(opts.choose) == 'function' ? opts.choose : require('subscription.amnezia_allocate').choose;
+        let allocation;
+        try { allocation = choose(cursor, opts); } catch (e) { return { ok: false, error: 'Cannot allocate AWG resources' }; }
+        if (type(allocation) != 'object' || allocation.ok !== true)
+            return { ok: false, error: 'Cannot allocate AWG resources' };
+        let inner = {};
+        for (let k in keys(opts)) inner[k] = opts[k];
+        inner.apply_driver = lease.apply;
+        inner.cleanup_driver = lease.cleanup;
+        let before_revision = store.revision(dir, source, identity);
+        let configs = store.load_configs(dir, source, identity);
+        if (before_revision == null || type(configs) != 'array' || type(index) != 'int' || index < 0 || index >= length(configs))
+            return { ok: false, error: 'Candidate unavailable' };
+        let result = activate(dir, active_dir, source, identity, index, allocation, timeout_ms, inner);
+        if (!result.ok || type(opts.publish) != 'function') return result;
+        let published = false;
+        try {
+            if (store.revision(dir, source, identity) == before_revision)
+                published = opts.publish(before_revision) === true;
+        } catch (e) {}
+        if (published) return result;
+        let removed = false;
+        try { removed = lease.cleanup(configs[index], allocation.name, allocation.table, allocation.priority).ok === true; } catch (e) {}
+        if (removed && require('subscription.amnezia_active').peek(active_dir, source, identity) == before_revision)
+            removed = fs.unlink(active_dir + '/' + source + '.json') === true;
+        return { ok: false, error: 'Failed to publish source status', cleanup_required: !removed };
+    });
 }
 return { apply_one, apply_one_and_record, activate, allocate_and_activate };

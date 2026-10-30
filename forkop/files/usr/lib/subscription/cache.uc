@@ -845,6 +845,25 @@ function source_cache_profile_matches(parsed, cached_url, cached_user_agent, cac
         hwid_matches_config(parsed.hwid, cached_hwid);
 }
 
+// AWG-only feeds have a dedicated status, never an empty legacy JSON cache.
+// A stored status alone is insufficient: verify the current tunnel and its
+// immutable last-good config before reporting the source usable.
+function awg_current_status(source, parsed) {
+    if (as_string(getenv('FORKOP_AWG_EXPERIMENTAL')) != '1') return null;
+    let status_dir = getenv('FORKOP_AWG_STATUS_DIR') || '/etc/forkop/awg-subscription-status';
+    let active_dir = getenv('FORKOP_AWG_ACTIVE_DIR') || '/etc/forkop/awg-active';
+    let good_dir = getenv('FORKOP_AWG_LAST_GOOD_DIR') || '/etc/forkop/awg-last-good';
+    let record = require('subscription.amnezia_status').read(status_dir, source);
+    if (record == null || !source_cache_profile_matches(parsed, record.url, record.user_agent, record.hwid, get_subscription_user_agent(''))) return null;
+    let identity = require('subscription.amnezia_identity').calculate(status_dir, source, record.url, record.user_agent, record.hwid);
+    if (identity == null || identity != record.identity ||
+        require('subscription.amnezia_active').peek(active_dir, source, identity) != record.revision) return null;
+    let cursor = require('uci').cursor();
+    if (!cursor || cursor.load('network') == null) return null;
+    let entries = require('subscription.amnezia_restore').restore(good_dir, active_dir, source, identity, cursor, 3000);
+    return type(entries) == 'array' && length(entries) ? record : null;
+}
+
 function section_current_usable_cache(section, tmp_dir, persistent_dir, default_user_agent) {
     section = object_or_empty(section);
     let name = section_name(section);
@@ -859,6 +878,7 @@ function section_current_usable_cache(section, tmp_dir, persistent_dir, default_
             continue;
 
         let source_section = source_id(name, index);
+        if (awg_current_status(source_section, parsed) != null) return true;
         if (!restore_persistent_subscription_cache(
             source_section,
             tmp_dir,
@@ -1839,6 +1859,45 @@ function stage_awg_subscription_candidate(raw_path, source, url, user_agent, hwi
     return 0;
 }
 
+// First activation of a single-profile AWG-only feed. Replacements and batches
+// are deliberately refused until they have transactional interface swapping.
+function activate_awg_only(section_name_value, source, url, configured_ua, configured_hwid, effective_ua, effective_hwid, raw_path) {
+    let awg = require('subscription.amnezia_subscription');
+    let raw = fs.readfile(raw_path);
+    if (!awg.only_awg(raw)) return 1;
+    let validation = awg.validated(raw);
+    if (!validation.ok || length(validation.profiles) != 1) return 1;
+    let active_dir = getenv('FORKOP_AWG_ACTIVE_DIR') || '/etc/forkop/awg-active';
+    let good_dir = getenv('FORKOP_AWG_LAST_GOOD_DIR') || '/etc/forkop/awg-last-good';
+    let status_dir = getenv('FORKOP_AWG_STATUS_DIR') || '/etc/forkop/awg-subscription-status';
+    let identity = awg_subscription_source_identity(source, url, effective_ua, effective_hwid);
+    let revision = require('subscription.amnezia_store').revision(FORKOP_AWG_CANDIDATE_DIR, source, identity);
+    if (identity == '' || revision == null) return 1;
+    let existing = require('subscription.amnezia_active').peek(active_dir, source, identity);
+    if (existing != null) {
+        if (existing != revision) return 1;
+        uci_core.reload(CONFIG_NAME);
+        let parsed = { url: url, user_agent: configured_ua, hwid: configured_hwid };
+        return awg_current_status(source, parsed) != null ? 2 : 1;
+    }
+    if (!common.secure_private_dir(active_dir) || !common.secure_private_dir(good_dir) || !common.secure_private_dir(status_dir)) return 1;
+    function current() {
+        uci_core.reload(CONFIG_NAME);
+        return subscription_config_is_current(section_name_value, url, configured_ua, configured_hwid, uci_sections());
+    }
+    if (!current()) return 4;
+    let result = require('subscription.amnezia_candidate_apply').allocate_and_activate(
+        FORKOP_AWG_CANDIDATE_DIR, active_dir, source, identity, 0, 15000,
+        { last_good_dir: good_dir, publish: function(rev) {
+            if (!current()) return false;
+            if (!require('subscription.amnezia_status').save(status_dir, active_dir, good_dir, source, url, effective_ua, effective_hwid, identity, rev)) return false;
+            return current();
+        } });
+    if (!result.ok && result.cleanup_required)
+        log_message('AWG activation failed and its owned interface needs inspection', 'error');
+    return result.ok ? 0 : 1;
+}
+
 function get_subscription_download_proxy_address(section_name_value, sections, parsed, phase) {
     let download_section = as_string(object_or_empty(parsed).download_section);
     if (download_section == "" || download_section == as_string(section_name_value))
@@ -1906,14 +1965,22 @@ function download_subscription_into_cache(section_name_value, subscription_url, 
         // Capturing a validated candidate is separate from publishing the
         // subscription or activating it. Invalid data leaves old candidates
         // and the running tunnel untouched; mixed legacy proxies still import.
-        if (as_string(getenv('FORKOP_AWG_STAGE_CANDIDATES')) == '1' &&
+        let awg_status = 1;
+        if ((as_string(getenv('FORKOP_AWG_STAGE_CANDIDATES')) == '1' || as_string(getenv('FORKOP_AWG_EXPERIMENTAL')) == '1') &&
             subscription_config_is_current(section_name_value, subscription_url, subscription_user_agent, subscription_hwid, sections)) {
-            let awg_status = stage_awg_subscription_candidate(raw_tmpfile, cache_section, subscription_url, effective_user_agent, effective_hwid);
+            awg_status = stage_awg_subscription_candidate(raw_tmpfile, cache_section, subscription_url, effective_user_agent, effective_hwid);
             if (awg_status == 2)
                 log_message("AmneziaWG subscription candidate could not be staged; previous candidate retained", "warn");
         }
 
         if (!parser.normalize_content_validated(raw_tmpfile, normalized_tmpfile)) {
+            if (as_string(getenv('FORKOP_AWG_EXPERIMENTAL')) == '1' && awg_status == 0 &&
+                require('subscription.amnezia_subscription').only_awg(fs.readfile(raw_tmpfile))) {
+                let activated = activate_awg_only(section_name_value, cache_section, subscription_url, subscription_user_agent,
+                    subscription_hwid, effective_user_agent, effective_hwid, raw_tmpfile);
+                unlink_path(raw_tmpfile); unlink_path(headers_tmpfile); unlink_path(normalized_tmpfile); unlink_path(metadata_tmpfile);
+                return activated;
+            }
             if (metadata_output_path != "")
                 unlink_path(metadata_output_path);
             if (subscription_user_agent != "")
@@ -2028,6 +2095,8 @@ function download_subscription_into_cache(section_name_value, subscription_url, 
 }
 
 function cached_source_status(source_section, parsed) {
+    let awg = awg_current_status(source_section, parsed);
+    if (awg != null) return { usable: true, current: true, cached_url: awg.url, cached_user_agent: awg.user_agent, cached_hwid: awg.hwid };
     restore_persistent_subscription_cache(
         source_section,
         TMP_SUBSCRIPTION_FOLDER,

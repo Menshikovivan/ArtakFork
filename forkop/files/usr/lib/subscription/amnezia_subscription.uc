@@ -54,4 +54,18 @@ function validated(data) {
     return { ok: true, profiles };
 }
 
-return { extract, validated };
+function only_awg(data) {
+    if (type(data) != 'string' || length(data) > 1048576) return false;
+    if (index(data, '://') < 0) data = decode64(replace(data, /[\r\n\t ]/g, ''));
+    if (type(data) != 'string') return false;
+    let seen = false;
+    for (let line in split(replace(data, /\r/g, ''), '\n')) {
+        line = trim(line);
+        if (line == '') continue;
+        if (substr(line, 0, 6) != 'vpn://') return false;
+        seen = true;
+    }
+    return seen && validated(data).ok;
+}
+
+return { extract, validated, only_awg };
