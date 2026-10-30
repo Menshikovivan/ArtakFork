@@ -240,6 +240,9 @@ build_app_root() {
 
   normalize_package_root_modes "$output_root"
   find "$output_root/etc/uci-defaults" -type f -exec chmod 0755 {} + 2>/dev/null || true
+  # rpcd discovers executable plugins by mode; the normalization above resets
+  # every file to 0644, so restore the mode for the shipped AWG RPC entry.
+  chmod 0755 "$output_root/usr/libexec/rpcd/luci.artak_awg"
 }
 
 build_i18n_root() {
