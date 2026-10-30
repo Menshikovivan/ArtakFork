@@ -92,7 +92,7 @@ jobs:
           chmod +x "$RUNNER_TEMP/ucode-bin/ucode"
           export PATH="$RUNNER_TEMP/ucode-bin:$PATH"
           result=0
-          for test in tests/list_cache.sh tests/google_gemini_inline.sh tests/urltest_empty_groups.sh tests/priority_reserve.sh tests/subscription_report_runtime.sh; do
+          for test in tests/list_cache.sh tests/google_gemini_inline.sh tests/urltest_empty_groups.sh tests/priority_reserve.sh tests/subscription_report_runtime.sh tests/amnezia_store.sh; do
             echo "Running $test"
             bash "$test" || result=1
           done

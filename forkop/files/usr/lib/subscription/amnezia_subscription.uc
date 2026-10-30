@@ -38,4 +38,20 @@ function extract(data) {
     return result;
 }
 
-return { extract };
+// Reject the whole AWG update if any vpn:// item is malformed or unsupported.
+// This prevents a partially valid feed from replacing last-known-good profiles.
+function validated(data) {
+    let source = extract(data), profiles = [];
+    if (source.invalid || !length(source.configs))
+        return { ok: false, error: 'No complete AmneziaWG profiles' };
+    let parser = require('subscription.amnezia_conf');
+    for (let item in source.configs) {
+        let parsed = parser.parse_conf(item);
+        if (!parsed.ok || length(parsed.peers) != 1)
+            return { ok: false, error: 'Invalid or unsupported AmneziaWG profile' };
+        push(profiles, parsed);
+    }
+    return { ok: true, profiles };
+}
+
+return { extract, validated };
