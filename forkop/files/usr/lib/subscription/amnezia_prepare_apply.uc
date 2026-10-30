@@ -50,8 +50,9 @@ function run(lease, journal_dir, generation_dir, good_dir, source, metadata, tim
                 !journal.finish(journal_dir, source, entry.index))
                 return {ok:false,error:'Preparation failed; inspect in-flight interface',recovery_required:true};
         }
-        let record = {version:1, kind:'subscription', source, identity:plan.identity, revision:plan.revision,
+        let record = {version:1, kind:'subscription', mode:metadata.mode || 'only', source, identity:plan.identity, revision:plan.revision,
             url:metadata.url, user_agent:metadata.user_agent, hwid:metadata.hwid, entries:plan.entries};
+        if (record.mode == 'mixed') record.legacy_revision = metadata.legacy_revision;
         let id = generation.stage(generation_dir, good_dir, record, function(e) { return current() && verified(e); });
         if (id == null || !current()) return {ok:false,error:'Cannot stage new generation',recovery_required:true};
         return {ok:true,generation:id,revision:plan.revision};

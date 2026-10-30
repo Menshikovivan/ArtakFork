@@ -861,10 +861,14 @@ function awg_current_status(source, parsed) {
             { matches_source: function(url, ua, hwid) { return source_cache_profile_matches(parsed, url, ua, hwid, get_subscription_user_agent('')); } });
         if (result == null) return null;
         let record = require('subscription.amnezia_generation').read_generation(gen_dir, source, result.generation);
+        if (record != null && record.mode == 'mixed' &&
+            require('subscription.amnezia_legacy_store').path(getenv('FORKOP_AWG_LEGACY_DIR') || '/etc/forkop/awg-legacy-good', record.legacy_revision) == null) return null;
         return record != null && record.kind == 'subscription' ? record : null;
     }
     let record = require('subscription.amnezia_status').read(status_dir, source);
     if (record == null || !source_cache_profile_matches(parsed, record.url, record.user_agent, record.hwid, get_subscription_user_agent(''))) return null;
+    if (record.mode == 'mixed' &&
+        require('subscription.amnezia_legacy_store').path(getenv('FORKOP_AWG_LEGACY_DIR') || '/etc/forkop/awg-legacy-good', record.legacy_revision) == null) return null;
     let identity = require('subscription.amnezia_identity').calculate(status_dir, source, record.url, record.user_agent, record.hwid);
     if (identity == null || identity != record.identity ||
         require('subscription.amnezia_active').peek(active_dir, source, identity) != record.revision) return null;
@@ -1869,12 +1873,13 @@ function stage_awg_subscription_candidate(raw_path, source, url, user_agent, hwi
     return 0;
 }
 
-// First activation of an AWG-only feed. Replacements are refused until they
+// First activation of an AWG source. Replacements are refused until they
 // have transactional interface swapping coordinated with the firewall.
-function activate_awg_only(section_name_value, source, url, configured_ua, configured_hwid, effective_ua, effective_hwid, raw_path) {
+function activate_awg_source(section_name_value, source, url, configured_ua, configured_hwid, effective_ua, effective_hwid, raw_path, mode, legacy_revision) {
     let awg = require('subscription.amnezia_subscription');
     let raw = fs.readfile(raw_path);
-    if (!awg.only_awg(raw)) return 1;
+    if ((mode != 'only' && mode != 'mixed') || (mode == 'only' && !awg.only_awg(raw)) ||
+        (mode == 'mixed' && awg.only_awg(raw))) return 1;
     let validation = awg.validated(raw);
     if (!validation.ok || !length(validation.profiles) || length(validation.profiles) > 32) return 1;
     let active_dir = getenv('FORKOP_AWG_ACTIVE_DIR') || '/etc/forkop/awg-active';
@@ -1889,7 +1894,9 @@ function activate_awg_only(section_name_value, source, url, configured_ua, confi
         if (existing != revision) return 1;
         uci_core.reload(CONFIG_NAME);
         let parsed = { url: url, user_agent: configured_ua, hwid: configured_hwid };
-        return awg_current_status(source, parsed) != null ? 2 : 1;
+        let current_status = awg_current_status(source, parsed);
+        return current_status != null && current_status.mode == mode &&
+            (mode != 'mixed' || current_status.legacy_revision == legacy_revision) ? 2 : 1;
     }
     if (fs.stat(generation_dir + '/' + source + '.current') != null) return 1;
     if (!common.secure_private_dir(active_dir) || !common.secure_private_dir(good_dir) ||
@@ -1906,7 +1913,7 @@ function activate_awg_only(section_name_value, source, url, configured_ua, confi
         FORKOP_AWG_CANDIDATE_DIR, active_dir, good_dir, source, identity, 15000,
         { publish: function(rev) {
             if (!current()) return false;
-            if (!require('subscription.amnezia_status').save(status_dir, active_dir, good_dir, source, url, effective_ua, effective_hwid, identity, rev)) return false;
+            if (!require('subscription.amnezia_status').save(status_dir, active_dir, good_dir, source, url, effective_ua, effective_hwid, identity, rev, mode, legacy_revision)) return false;
             let gen = require('subscription.amnezia_generation');
             let cursor = require('uci').cursor(), migrated = false;
             try {
@@ -2002,8 +2009,8 @@ function download_subscription_into_cache(section_name_value, subscription_url, 
         if (!parser.normalize_content_validated(raw_tmpfile, normalized_tmpfile)) {
             if (require('subscription.amnezia_feature').enabled() && awg_status == 0 &&
                 require('subscription.amnezia_subscription').only_awg(fs.readfile(raw_tmpfile))) {
-                let activated = activate_awg_only(section_name_value, cache_section, subscription_url, subscription_user_agent,
-                    subscription_hwid, effective_user_agent, effective_hwid, raw_tmpfile);
+                let activated = activate_awg_source(section_name_value, cache_section, subscription_url, subscription_user_agent,
+                    subscription_hwid, effective_user_agent, effective_hwid, raw_tmpfile, 'only');
                 unlink_path(raw_tmpfile); unlink_path(headers_tmpfile); unlink_path(normalized_tmpfile); unlink_path(metadata_tmpfile);
                 return activated;
             }
@@ -2023,13 +2030,18 @@ function download_subscription_into_cache(section_name_value, subscription_url, 
             let status_dir = getenv('FORKOP_AWG_STATUS_DIR') || '/etc/forkop/awg-subscription-status';
             let previous = require('subscription.amnezia_status').read(status_dir, cache_section);
             let id = awg_subscription_source_identity(cache_section, subscription_url, effective_user_agent, effective_hwid);
-            if (previous != null && previous.identity == id) {
+            if (previous != null && previous.identity == id && previous.mode == 'only') {
                 unlink_path(raw_tmpfile); unlink_path(headers_tmpfile); unlink_path(normalized_tmpfile); unlink_path(metadata_tmpfile);
                 log_message('Changing an active AWG-only source requires a coordinated update; previous configuration retained', 'warn');
                 return 1;
             }
         }
 
+        if (require('subscription.amnezia_feature').enabled() && awg_status == 2) {
+            unlink_path(raw_tmpfile); unlink_path(headers_tmpfile); unlink_path(normalized_tmpfile); unlink_path(metadata_tmpfile);
+            log_message('Mixed subscription AWG candidate is invalid; previous cache retained', 'warn');
+            return 1;
+        }
         if (!subscription_share_link.populate_subscription_file(normalized_tmpfile))
             log_message("Failed to cache direct proxy links for subscription rule '" + section_name_value + "'", "warn");
 
@@ -2055,6 +2067,30 @@ function download_subscription_into_cache(section_name_value, subscription_url, 
             return 1;
         }
 
+        let mixed_awg = require('subscription.amnezia_feature').enabled() && awg_status == 0;
+        let mixed_awg_added = false;
+        if (mixed_awg) {
+            let legacy_revision = require('subscription.amnezia_legacy_store').put(normalized_tmpfile,
+                getenv('FORKOP_AWG_LEGACY_DIR') || '/etc/forkop/awg-legacy-good');
+            let activated = legacy_revision == null ? 1 : activate_awg_source(section_name_value, cache_section, subscription_url, subscription_user_agent,
+                subscription_hwid, effective_user_agent, effective_hwid, raw_tmpfile, 'mixed', legacy_revision);
+            if (activated != 0 && activated != 2) {
+                unlink_path(raw_tmpfile); unlink_path(headers_tmpfile); unlink_path(normalized_tmpfile); unlink_path(metadata_tmpfile);
+                log_message('Mixed subscription AWG activation failed; previous cache retained', 'warn');
+                return activated == 4 ? 4 : 1;
+            }
+            mixed_awg_added = activated == 0;
+            uci_core.reload(CONFIG_NAME);
+            connections.set_item_sections_from_cursor({ foreach: function(pkg, stype, fn) {
+                for (let item in uci_core.section_objects(pkg, stype)) fn(item);
+            } }, CONFIG_NAME);
+            if (!subscription_config_is_current(section_name_value, subscription_url, subscription_user_agent, subscription_hwid, uci_sections())) {
+                unlink_path(raw_tmpfile); unlink_path(headers_tmpfile); unlink_path(normalized_tmpfile); unlink_path(metadata_tmpfile);
+                log_message('Mixed subscription source changed after AWG activation; inspect pending generation', 'warn');
+                return 4;
+            }
+        }
+
         if (files_equal(normalized_tmpfile, subscription_json_path)) {
             remember_change_report(section_name_value, source_index, subscription_json_path, normalized_tmpfile, "unchanged");
             write_text(subscription_url_cache_path, subscription_url);
@@ -2069,10 +2105,10 @@ function download_subscription_into_cache(section_name_value, subscription_url, 
             unlink_path(normalized_tmpfile);
             unlink_path(metadata_tmpfile);
             log_subscription_source_summary(section_name_value, source_index, subscription_json_path, "unchanged");
-            return 2;
+            return mixed_awg_added ? 0 : 2;
         }
 
-        if (file_nonempty(subscription_json_path) && parser.runtime_outbounds_equal(normalized_tmpfile, subscription_json_path)) {
+        if (!mixed_awg && file_nonempty(subscription_json_path) && parser.runtime_outbounds_equal(normalized_tmpfile, subscription_json_path)) {
             remember_change_report(section_name_value, source_index, subscription_json_path, normalized_tmpfile, "unchanged");
             // Keep the already applied representation and outbound order. The
             // refreshed file differs only in metadata ignored by the runtime
@@ -2096,6 +2132,7 @@ function download_subscription_into_cache(section_name_value, subscription_url, 
         let report_index = type(pending_change_report) == "array" ? length(pending_change_report) : -1;
         remember_change_report(section_name_value, source_index, subscription_json_path, normalized_tmpfile, "updated");
         if (!move_file(normalized_tmpfile, subscription_json_path)) {
+            if (mixed_awg) log_message('Mixed subscription AWG is active but legacy cache publication failed; inspect pending generation', 'error');
             if (report_index >= 0 && length(pending_change_report) > report_index) pop(pending_change_report);
             if (metadata_output_path != "")
                 unlink_path(metadata_output_path);

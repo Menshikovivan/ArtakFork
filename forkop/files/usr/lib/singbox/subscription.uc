@@ -411,8 +411,32 @@ function source_json_path(source_section) {
     return TMP_SUBSCRIPTION_FOLDER + "/" + source_section + ".json";
 }
 
+function effective_source_json_path(source_section) {
+    if (type(source_section) != 'string' || !match(source_section, /^[A-Za-z0-9_-]{1,100}$/)) return null;
+    if (!require('subscription.amnezia_feature').enabled()) return source_json_path(source_section);
+    let dir = getenv('FORKOP_AWG_GENERATION_DIR') || '/etc/forkop/awg-generations';
+    let good = getenv('FORKOP_AWG_LEGACY_DIR') || '/etc/forkop/awg-legacy-good';
+    if (fs.stat(dir + '/' + source_section + '.current') == null) {
+        let status_dir = getenv('FORKOP_AWG_STATUS_DIR') || '/etc/forkop/awg-subscription-status';
+        if (fs.stat(status_dir + '/' + source_section + '.json') == null) return source_json_path(source_section);
+        let status = require('subscription.amnezia_status').read(status_dir, source_section);
+        return status != null && status.mode == 'mixed'
+            ? require('subscription.amnezia_legacy_store').path(good, status.legacy_revision) : null;
+    }
+    let gen = require('subscription.amnezia_generation');
+    let id = gen.current_id(dir, source_section);
+    let record = id == null ? null : gen.read_generation(dir, source_section, id);
+    if (record == null || record.mode != 'mixed') return null;
+    return require('subscription.amnezia_legacy_store').path(good, record.legacy_revision);
+}
+function source_content_hash(source_section) {
+    let path = effective_source_json_path(source_section);
+    return path == null ? null : require('subscription.amnezia_generation').hash_file(path);
+}
+
 function read_source_outbounds(source_section) {
-    let subscription = object_or_empty(read_json_file(source_json_path(source_section)));
+    let path = effective_source_json_path(source_section);
+    let subscription = object_or_empty(path == null ? null : read_json_file(path));
     return subscription_parser.repair_cached_outbounds(array_or_empty(subscription.outbounds));
 }
 
@@ -451,6 +475,7 @@ return {
     remember_priority_group,
     source_cache_is_current,
     awg_source_identity,
+    source_content_hash,
     read_source_outbounds,
     new_section_state
 };

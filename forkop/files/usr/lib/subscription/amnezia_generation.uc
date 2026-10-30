@@ -18,14 +18,16 @@ function digest(path) {
 }
 function checked(record) {
     let kind = record?.kind || 'subscription';
+    let mode = record?.mode || 'only';
     if (type(record) != 'object' || record.version != 1 || !source_ok(record.source) ||
         !hash_ok(record.identity) || !hash_ok(record.revision) ||
-        (kind != 'subscription' && kind != 'manual') || type(record.url) != 'string' ||
+        (kind != 'subscription' && kind != 'manual') || (mode != 'only' && mode != 'mixed') || type(record.url) != 'string' ||
+        (mode == 'mixed' && !hash_ok(record.legacy_revision)) ||
         (kind == 'subscription' && record.url == '') || type(record.user_agent) != 'string' || type(record.hwid) != 'string' ||
         type(record.entries) != 'array' || !length(record.entries) || length(record.entries) > 32) return null;
     if (kind == 'manual') {
         let matched = match(record.source, /^manual_([0-9a-f]{32})$/);
-        if (matched == null || record.identity != matched[1] + matched[1] || record.url != '' ||
+        if (matched == null || mode != 'only' || record.identity != matched[1] + matched[1] || record.url != '' ||
             record.user_agent != '' || record.hwid != '') return null;
     }
     let entries = [], names = {}, tables = {}, indices = {}, priorities = {};
@@ -38,8 +40,10 @@ function checked(record) {
         priorities['' + priority] = true; priorities['' + (priority + 1)] = true;
         push(entries, { index:e.index, name:e.name, table:e.table, priority:e.priority });
     }
-    return { version:1, kind, source:record.source, identity:record.identity, revision:record.revision,
+    let result = { version:1, kind, mode, source:record.source, identity:record.identity, revision:record.revision,
         url:record.url, user_agent:record.user_agent, hwid:record.hwid, entries };
+    if (mode == 'mixed') result.legacy_revision = record.legacy_revision;
+    return result;
 }
 function read_generation(dir, source, generation) {
     if (type(dir) != 'string' || dir == '' || dir == '/' || !source_ok(source) || !hash_ok(generation)) return null;
@@ -64,6 +68,8 @@ function stage(dir, good_dir, record, verify) {
         !common.secure_private_dir(dir)) return null;
     if ((value.kind == 'subscription' && identity.calculate(dir, value.source, value.url, value.user_agent, value.hwid) != value.identity) ||
         store.revision(good_dir + '/' + value.revision, value.source, value.identity) != value.revision) return null;
+    if (value.mode == 'mixed' && require('subscription.amnezia_legacy_store').path(
+        getenv('FORKOP_AWG_LEGACY_DIR') || '/etc/forkop/awg-legacy-good', value.legacy_revision) == null) return null;
     for (let entry in value.entries) try { if (verify(entry) !== true) return null; } catch (e) { return null; }
     let t = clock(), tmp = sprintf('%s/.generation-%s-%d-%d.tmp', dir, value.source, t[0], t[1]);
     if (common.write_private_json_file(tmp, value) == null) { fs.unlink(tmp); return null; }
@@ -87,4 +93,4 @@ function remove_current(dir, source, expected) {
     if (!source_ok(source) || !hash_ok(expected) || current_id(dir, source) != expected) return false;
     return fs.unlink(dir + '/' + source + '.current') === true;
 }
-return { stage, read_generation, current_id, switch_to, remove_current };
+return { stage, read_generation, current_id, switch_to, remove_current, hash_file:digest };

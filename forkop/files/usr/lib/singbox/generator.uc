@@ -876,7 +876,14 @@ function add_awg_subscription_source(config, section, source_section, source_ent
         if (type(entries) != 'array' || !length(entries)) return 0;
         let snapshot_dir = getenv('FORKOP_AWG_SNAPSHOT_DIR') || '/etc/forkop/awg-snapshot';
         let snapshot_module = require('subscription.amnezia_snapshot');
-        let snapshot = snapshot_module.load(snapshot_dir);
+        // A swap guard is global: every source uses the snapshot for the same
+        // verified journal phase, including sources not being replaced.
+        let context_module = require('subscription.amnezia_swap_context');
+        let journal_dir = getenv('FORKOP_AWG_SWAP_JOURNAL_DIR') || '/etc/forkop/awg-swap-journal';
+        let snapshot_base = '/etc/forkop/awg-swap-snapshots';
+        let context = context_module.select_any(journal_dir, generation_dir, snapshot_base);
+        if (type(context) != 'object' || context.ok !== true) return 0;
+        let snapshot = context.transition ? context.snapshot : snapshot_module.load(snapshot_dir);
         if (snapshot == null) return 0;
         let revision = restored.revision;
         if (revision == null) return 0;
@@ -887,9 +894,20 @@ function add_awg_subscription_source(config, section, source_section, source_ent
         if (length(selected) != length(entries)) return 0;
         // guard.verify must prove the currently installed persistent WAN guard,
         // including the mark and interface, before these records are emitted.
-        let result = require('subscription.amnezia_guard').verify(selected, snapshot.revision, { snapshot_dir });
+        let result;
+        if (context.transition) {
+            for (let item in selected) {
+                let found = false;
+                for (let guard in context.guards)
+                    if (guard.name == item.name && guard.mark == item.mark) found = true;
+                if (!found) return 0;
+            }
+            result = { ok:true, entries:selected };
+        } else result = require('subscription.amnezia_guard').verify(selected, snapshot.revision, { snapshot_dir });
         if (type(result) != 'object' || result.ok !== true || type(result.entries) != 'array' || length(result.entries) != length(entries)) return 0;
-        let fresh_snapshot = snapshot_module.load(snapshot_dir);
+        let after_context = context_module.select_any(journal_dir, generation_dir, snapshot_base);
+        if (type(after_context) != 'object' || after_context.ok !== true || after_context.transition != context.transition) return 0;
+        let fresh_snapshot = context.transition ? after_context.snapshot : snapshot_module.load(snapshot_dir);
         if (fresh_snapshot == null || fresh_snapshot.revision != snapshot.revision) return 0;
         let pending = [];
         for (let i = 0; i < length(entries); i++) {
@@ -919,27 +937,45 @@ function add_awg_subscription_source(config, section, source_section, source_ent
 function add_subscription_source_with_state(config, section, source_index, source_entry, taken, selector_tags, urltest_candidate_tags, state, show_metadata, include_urltest_groups, hide_urltest_group_outbounds, hide_detour_outbounds, node_prefix) {
     let section_name = section[".name"];
     let source_section = runtime_subscription.source_id(section_name, source_index);
+    let mixed_revision = null;
     // A successfully promoted AWG-only source supersedes a retained legacy
     // cache. Do not accidentally resurrect old VLESS nodes after migration.
     if (require('subscription.amnezia_feature').enabled()) {
         let generation_dir = getenv('FORKOP_AWG_GENERATION_DIR') || '/etc/forkop/awg-generations';
-        if (fs.stat(generation_dir + '/' + source_section + '.current') != null)
-            return add_awg_subscription_source(config, section, source_section, source_entry, taken, selector_tags, urltest_candidate_tags, state);
+        if (fs.stat(generation_dir + '/' + source_section + '.current') != null) {
+            let generation = require('subscription.amnezia_generation');
+            let current = generation.current_id(generation_dir, source_section);
+            let record = current == null ? null : generation.read_generation(generation_dir, source_section, current);
+            if (record == null) return 0;
+            if (record.mode != 'mixed')
+                return add_awg_subscription_source(config, section, source_section, source_entry, taken, selector_tags, urltest_candidate_tags, state);
+            mixed_revision = record.legacy_revision;
+            let identity = runtime_subscription.awg_source_identity(source_section, source_entry,
+                connections.subscription_user_agent(section, source_entry), connections.subscription_hwid(section, source_entry),
+                getenv('FORKOP_AWG_CANDIDATE_DIR') || '/etc/forkop/awg-subscription-candidates');
+            if (identity == null || identity != record.identity) return 0;
+            if (type(mixed_revision) != 'string' || !match(mixed_revision, /^[0-9a-f]{64}$/) ||
+                runtime_subscription.source_content_hash(source_section) != mixed_revision) return 0;
+        }
         let status_dir = getenv('FORKOP_AWG_STATUS_DIR') || '/etc/forkop/awg-subscription-status';
         let candidate_dir = getenv('FORKOP_AWG_CANDIDATE_DIR') || '/etc/forkop/awg-subscription-candidates';
-        let status = require('subscription.amnezia_status').read(status_dir, source_section);
+        let status = mixed_revision == null ? require('subscription.amnezia_status').read(status_dir, source_section) : null;
         // A corrupt or mismatched status must not silently resurrect an old
         // legacy cache. Require a fresh verified update to resolve it.
-        if (status == null && fs.stat(status_dir + '/' + source_section + '.json') != null) return 0;
+        if (mixed_revision == null && status == null && fs.stat(status_dir + '/' + source_section + '.json') != null) return 0;
         if (status != null) {
             let identity = runtime_subscription.awg_source_identity(source_section, source_entry,
                 connections.subscription_user_agent(section, source_entry), connections.subscription_hwid(section, source_entry), candidate_dir);
-            if (identity != null && identity == status.identity)
-                return add_awg_subscription_source(config, section, source_section, source_entry, taken, selector_tags, urltest_candidate_tags, state);
-            return 0;
+            if (identity != null && identity == status.identity) {
+                if (status.mode != 'mixed')
+                    return add_awg_subscription_source(config, section, source_section, source_entry, taken, selector_tags, urltest_candidate_tags, state);
+                mixed_revision = status.legacy_revision;
+                if (type(mixed_revision) != 'string' || !match(mixed_revision, /^[0-9a-f]{64}$/) ||
+                    runtime_subscription.source_content_hash(source_section) != mixed_revision) return 0;
+            } else return 0;
         }
     }
-    if (!runtime_subscription.source_cache_is_current(
+    if (mixed_revision == null && !runtime_subscription.source_cache_is_current(
         source_section,
         source_entry,
         connections.subscription_user_agent(section, source_entry),
@@ -948,6 +984,7 @@ function add_subscription_source_with_state(config, section, source_index, sourc
         return add_awg_subscription_source(config, section, source_section, source_entry, taken, selector_tags, urltest_candidate_tags, state);
 
     let source_outbounds = runtime_subscription.read_source_outbounds(source_section);
+    if (mixed_revision != null && runtime_subscription.source_content_hash(source_section) != mixed_revision) return 0;
     source_outbounds = subscription_exclude_regex_outbounds(
         source_outbounds,
         effective_subscription_exclude_regex(section, source_entry)

@@ -14,8 +14,9 @@ function migrate(status_dir, active_dir, good_dir, generation_dir, source, curso
     let entries = legacy.restore(good_dir, active_dir, source, s.identity, cursor, timeout_ms, opts);
     if (type(entries) != 'array' || !length(entries) || opts.current() !== true ||
         active.peek(active_dir, source, s.identity) != s.revision) return false;
-    let record = { version:1, kind:'subscription', source, identity:s.identity, revision:s.revision,
+    let record = { version:1, kind:'subscription', mode:s.mode, source, identity:s.identity, revision:s.revision,
         url:s.url, user_agent:s.user_agent, hwid:s.hwid, entries };
+    if (s.mode == 'mixed') record.legacy_revision = s.legacy_revision;
     let id = generation.stage(generation_dir, good_dir, record, function() { return opts.current() === true; });
     return id != null && opts.current() === true && generation.switch_to(generation_dir, source, null, id);
 }

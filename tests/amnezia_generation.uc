@@ -6,6 +6,7 @@ let journal = require('subscription.amnezia_swap_journal');
 let swap = require('subscription.amnezia_swap');
 let orchestrator = require('subscription.amnezia_orchestrator');
 let generation_restore = require('subscription.amnezia_generation_restore');
+let legacy_store = require('subscription.amnezia_legacy_store');
 function expect(v, msg) { if (!v) die('FAIL: ' + msg + '\n'); }
 let base = ARGV[0], candidates = base + '/candidate', good = base + '/good', gen = base + '/generation', jdir = base + '/journal';
 expect(fs.mkdir(candidates) && fs.mkdir(good) && fs.mkdir(gen) && fs.mkdir(jdir), 'fixture directories');
@@ -20,6 +21,24 @@ let record = {version:1, source:'source', identity:id, revision:first, url:'http
     entries:[{index:0,name:'afawg_1',table:'15001',priority:'16002',private_key:key}]};
 let first_id = generation.stage(gen, good, record, function() { return true; });
 expect(first_id != null && generation.switch_to(gen, 'source', null, first_id), 'first generation publication');
+record.mode = 'mixed';
+expect(generation.stage(gen, good, record, function() { return true; }) == null, 'mixed generation without legacy hash accepted');
+let legacy_text = '{"outbounds":[{"type":"direct","tag":"example"}]}';
+expect(fs.writefile(base + '/legacy.json', legacy_text) != null, 'legacy fixture');
+record.legacy_revision = generation.hash_file(base + '/legacy.json');
+let legacy_dir = base + '/legacy-good';
+expect(legacy_store.put(base + '/legacy.json', legacy_dir) == record.legacy_revision &&
+    legacy_store.path(legacy_dir, record.legacy_revision) != null, 'immutable legacy stage');
+expect(fs.writefile(base + '/legacy.json', '{"outbounds":[{"type":"direct"}]}') != null &&
+    legacy_store.path(legacy_dir, record.legacy_revision) != null, 'staged legacy changed with mutable source');
+let immutable = legacy_store.path(legacy_dir, record.legacy_revision);
+expect(fs.writefile(immutable, '{}') != null && legacy_store.path(legacy_dir, record.legacy_revision) == null,
+    'tampered immutable legacy accepted');
+expect(fs.writefile(immutable, legacy_text) != null, 'restore immutable fixture');
+let mixed_id = generation.stage(gen, good, record, function() { return true; });
+expect(mixed_id != null && generation.read_generation(gen, 'source', mixed_id).legacy_revision == record.legacy_revision,
+    'mixed legacy hash was not retained');
+record.mode = 'only';
 expect(index(fs.readfile(gen + '/source-' + first_id + '.json'), key) < 0, 'key in generation');
 expect(store.save(candidates, 'source', id, 'vpn://' + b64enc(replace(config, 'example.invalid', 'second.invalid'))), 'second candidate');
 let second = store.revision(candidates, 'source', id);
