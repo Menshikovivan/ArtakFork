@@ -24,7 +24,7 @@ class Mirror(http.server.BaseHTTPRequestHandler):
             url = 'https://downloads.openwrt.org' + path[len('/openwrt'):]
         elif re.fullmatch(r'/2grey/[A-Za-z0-9_.-]+\.apk', path):
             url = 'https://github.com/2Grey/awg-openwrt/releases/download/v25.12.6/' + path.rsplit('/', 1)[1]
-        elif re.fullmatch(r'/artak/(forkop|luci-app-forkop)_2\.4\.3-canary\.7\.apk', path) and os.getenv('ARTAK_E2E_PACKAGES'):
+        elif re.fullmatch(r'/artak/(forkop|luci-app-forkop)_2\.4\.3-canary\.8\.apk', path) and os.getenv('ARTAK_E2E_PACKAGES'):
             package = pathlib.Path(os.environ['ARTAK_E2E_PACKAGES']) / path.rsplit('/', 1)[1]
             try:
                 data = package.read_bytes()
@@ -107,6 +107,9 @@ def main():
             if 'ARTAK_E2E_PASSED' not in vm.before:
                 raise RuntimeError('ArtakFork end-to-end test did not reach its success marker')
             print('OpenWrt VM: ArtakFork AWG end-to-end passed')
+            upload('amnezia_recovery_barrier_vm.sh', '/tmp/artak-recovery-barrier.sh')
+            command(vm, 'ARTAK_DISPOSABLE_VM=1 sh /tmp/artak-recovery-barrier.sh', timeout=180)
+            print('OpenWrt VM: unfinished journal barrier passed')
     except Exception:
         # Guest script uses generated throwaway keys and never prints them.
         print('OpenWrt guest serial tail:', str(vm.before)[-5000:], file=sys.stderr)
