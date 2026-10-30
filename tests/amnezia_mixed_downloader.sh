@@ -124,8 +124,8 @@ stage=legacy-rename
 if TEST_FAIL_RENAME=1 ucode -L "$FORKOP_LIB" "$FORKOP_LIB/subscription/cache.uc" update-source other 1 https://example.invalid/sub runtime; then
  echo 'failed legacy rename was accepted' >&2; exit 1
 fi
-test -s "$WORK/generation/other-subscription-1.current"
-test ! -e "$WORK/singbox/subscriptions/other-subscription-1.json"
-cmp "$WORK/pointer-before" "$WORK/generation/test-subscription-1.current"
-cmp "$WORK/legacy-before" "$WORK/singbox/subscriptions/test-subscription-1.json"
+test -s "$WORK/generation/other-subscription-1.current" || { echo 'new generation pointer missing' >&2; exit 1; }
+test ! -e "$WORK/singbox/subscriptions/other-subscription-1.json" || { echo 'unexpected mutable JSON after rename failure' >&2; exit 1; }
+cmp "$WORK/pointer-before" "$WORK/generation/test-subscription-1.current" || { echo 'old pointer changed after rename failure' >&2; exit 1; }
+cmp "$WORK/legacy-before" "$WORK/singbox/subscriptions/test-subscription-1.json" || { echo 'old JSON changed after rename failure' >&2; exit 1; }
 echo 'mixed downloader: initial, invalid, source change and legacy rename failure passed'
