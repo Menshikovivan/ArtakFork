@@ -35,10 +35,23 @@ apk --allow-untrusted --simulate add /tmp/awg-tools.apk /tmp/awg-kmod.apk >/dev/
 apk --allow-untrusted add /tmp/awg-tools.apk /tmp/awg-kmod.apk >/dev/null
 modprobe amneziawg
 command -v awg >/dev/null
+# Verify whether the newly installed handler is visible after a config reload,
+# before testing the more disruptive service restart.
+if ubus call network get_proto_handlers | grep -q '"amneziawg"'; then
+    echo 'VM stage: handler already visible after install'
+else
+    /etc/init.d/network reload
+    if ubus call network get_proto_handlers | grep -q '"amneziawg"'; then
+        echo 'VM stage: network reload registered AWG handler'
+    else
+        echo 'VM stage: network reload did not register AWG handler'
+    fi
+fi
 # netifd may have loaded its protocol handlers before the package was added.
 echo 'VM stage: restarting netifd'
 if ! /etc/init.d/network restart; then echo 'VM stage: network restart returned failure' >&2; exit 1; fi
 echo 'VM stage: netifd restarted'
+ubus call network get_proto_handlers | grep -q '"amneziawg"' || { echo 'AWG protocol handler not registered' >&2; exit 1; }
 
 run_profile() {
     profile=$1
@@ -92,6 +105,13 @@ run_profile() {
             logread | grep -E 'netifd|amneziawg' | tail -40 | sed -E 's/[A-Za-z0-9+\/]{42,43}=/[REDACTED]/g' || true
             exit 1
         }
+        sleep 1
+    done
+    # netifd can report the logical interface up before the kernel device's
+    # administrative UP flag is visible to the route operation.
+    n=0
+    while ! ip -o link show ata | grep -q '<[^>]*UP[,>]'; do
+        n=$((n+1)); [ "$n" -lt 30 ] || { echo "kernel interface ata did not become UP for $profile" >&2; ip link show ata || true; exit 1; }
         sleep 1
     done
     # The moved interface retains its UDP socket in its creation namespace.

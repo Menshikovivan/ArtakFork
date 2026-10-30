@@ -19,7 +19,9 @@ function make_rule(entry) { return {rule:{family:'inet',table:'ForkopTable',chai
 function runner() {
     let rules = [make_rule(e1), make_rule(e2)];
     if (state == 'retired_single' || state == 'retired_bad_global') rules = [make_rule(e2)];
-    if (state == 'retired_extra') rules = [make_rule(e2), make_rule(e1)];
+    // A full union is valid in either order. Duplicate the new guard so the
+    // prefix is not a union and the later stale old guard must be rejected.
+    if (state == 'retired_extra') rules = [make_rule(e2), make_rule(e2), make_rule(e1)];
     if (state == 'missing') pop(rules);
     if (state == 'wrong') rules[1].rule.expr[1].match.right = 'wan';
     if (state == 'bypass') rules[0].rule.expr = [{accept:null}];

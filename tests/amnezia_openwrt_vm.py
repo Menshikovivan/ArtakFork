@@ -89,6 +89,7 @@ def main():
             command(vm, "ucode -e 'let f=require(\"fs\");let b=f.readfile(\"/tmp/artak-guest.b64\");let d=b64dec(b);if(d==null||f.writefile(\"" + guest_name + "\",d)==null)exit(1);'")
         upload('amnezia_openwrt_guest.sh', '/tmp/artak-guest.sh')
         upload('openwrt_fw4_guard.sh', '/tmp/artak-fw4.sh')
+        upload('openwrt_nft_create_only.sh', '/tmp/artak-nft-create.sh')
         command(vm, f'ARTAK_MIRROR=http://10.0.2.2:{mirror.server_port} sh /tmp/artak-guest.sh', timeout=600)
         if 'AWG_VM_ALL_TESTS_PASSED' not in vm.before:
             raise RuntimeError('Guest completed without success marker')
@@ -98,6 +99,8 @@ def main():
         command(vm, '/etc/init.d/firewall start', timeout=120)
         command(vm, 'ARTAK_DISPOSABLE_VM=1 sh /tmp/artak-fw4.sh', timeout=120)
         print('OpenWrt VM: stock firewall reload retained the independent test guard')
+        command(vm, 'ARTAK_DISPOSABLE_VM=1 sh /tmp/artak-nft-create.sh', timeout=120)
+        print('OpenWrt VM: nft create-only collision behavior passed')
         if os.getenv('ARTAK_E2E_PACKAGES'):
             upload('amnezia_artak_e2e_guest.sh', '/tmp/artak-e2e.sh')
             command(vm, f'ARTAK_MIRROR=http://10.0.2.2:{mirror.server_port} ARTAK_DISPOSABLE_VM=1 sh /tmp/artak-e2e.sh', timeout=600)

@@ -8,8 +8,13 @@ echo 'E2E stage: install built packages'
 # The stock VM firewall can leave a rejecting base chain after stop/reload;
 # only this disposable image uses its LAN as the package-download uplink.
 nft flush ruleset
+ip addr replace 10.0.2.15/24 dev br-lan
+ip route replace default via 10.0.2.2 dev br-lan
+echo 'E2E stage: verify temporary package uplink'
+ip route get 10.0.2.2
+ping -c 1 -W 2 10.0.2.2 >/dev/null || { echo 'VM package gateway unreachable' >&2; nft list ruleset; exit 1; }
 for package in forkop luci-app-forkop; do
-    wget -q -O "/tmp/$package.apk" "$ARTAK_MIRROR/artak/${package}_2.4.3-canary.7.apk"
+    wget -O "/tmp/$package.apk" "$ARTAK_MIRROR/artak/${package}_2.4.3-canary.7.apk" || { echo "VM package download failed: $package" >&2; nft list ruleset; exit 1; }
 done
 apk --allow-untrusted --simulate add /tmp/forkop.apk /tmp/luci-app-forkop.apk >/dev/null
 apk --allow-untrusted add /tmp/forkop.apk /tmp/luci-app-forkop.apk >/dev/null
