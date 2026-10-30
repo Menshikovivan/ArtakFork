@@ -2,6 +2,7 @@
 # OpenWrt QEMU guest only. Creates disposable local test interfaces and keys.
 set -eu
 umask 077
+[ -n "${ARTAK_MIRROR:-}" ] || { echo 'Missing isolated host package mirror' >&2; exit 1; }
 n=0
 while ! ip link show br-lan >/dev/null 2>&1 ||
       [ "$(ubus call network.interface.lan status 2>/dev/null | jsonfilter -e '@.up')" != true ]; do
@@ -20,9 +21,10 @@ printf 'nameserver 10.0.2.3\n' > /tmp/resolv.conf
 /etc/init.d/firewall stop
 ip -4 route get 1.1.1.1
 ping -q -c 1 -W 2 10.0.2.2 >/dev/null
+sed -i "s#https://downloads.openwrt.org#$ARTAK_MIRROR/openwrt#g" /etc/apk/repositories.d/distfeeds.list
 apk update >/dev/null
 apk add ip-full >/dev/null
-base=https://github.com/2Grey/awg-openwrt/releases/download/v25.12.6
+base=$ARTAK_MIRROR/2grey
 suffix=v25.12.6_x86_64_x86_64.apk
 wget -q -O /tmp/awg-tools.apk "$base/amneziawg-tools_$suffix"
 wget -q -O /tmp/awg-kmod.apk "$base/kmod-amneziawg_$suffix"
