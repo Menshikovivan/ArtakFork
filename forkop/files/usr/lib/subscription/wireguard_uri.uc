@@ -20,8 +20,12 @@ function decode(value, form) {
 }
 
 function parse(link) {
-    if (type(link) != 'string' || length(link) > 8192 || match(link, /[\x00-\x20\x7f]/))
-        return { ok: false };
+    if (type(link) != 'string' || length(link) > 8192) return { ok: false };
+    // ucode's POSIX regexp engine does not accept JavaScript hex escapes.
+    for (let i = 0; i < length(link); i++) {
+        let c = ord(substr(link, i, 1));
+        if (c <= 32 || c == 127) return { ok: false };
+    }
     let prefix = substr(link, 0, 12) == 'wireguard://' ? 12 : substr(link, 0, 5) == 'wg://' ? 5 : 0;
     if (!prefix) return { ok: false };
     let body = substr(link, prefix), fragment = index(body, '#');
