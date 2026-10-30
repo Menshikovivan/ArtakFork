@@ -5,11 +5,13 @@ on:
     paths:
       - 'tests/amnezia_openwrt_guest.sh'
       - 'tests/amnezia_openwrt_vm.py'
+      - 'tests/openwrt_fw4_guard.sh'
       - '.github/workflows/amnezia-openwrt-vm.yml'
   pull_request:
     paths:
       - 'tests/amnezia_openwrt_guest.sh'
       - 'tests/amnezia_openwrt_vm.py'
+      - 'tests/openwrt_fw4_guard.sh'
       - '.github/workflows/amnezia-openwrt-vm.yml'
   workflow_dispatch:
 

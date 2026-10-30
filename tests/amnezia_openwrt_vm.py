@@ -22,8 +22,6 @@ def main():
     if len(sys.argv) != 2:
         raise SystemExit('Usage: amnezia_openwrt_vm.py DISPOSABLE_RAW_IMAGE')
     image = str(pathlib.Path(sys.argv[1]).resolve())
-    script = (ROOT / 'tests/amnezia_openwrt_guest.sh').read_bytes()
-    encoded = base64.b64encode(script).decode('ascii')
     cmd = ['qemu-system-x86_64', '-machine', 'accel=tcg', '-m', '384', '-smp', '2',
            '-drive', f'file={image},format=raw,if=virtio', '-netdev', 'user,id=net0',
            '-device', 'virtio-net-pci,netdev=net0', '-nographic', '-monitor', 'none', '-no-reboot']
@@ -34,14 +32,20 @@ def main():
         # The hostname may still be "(none)" when the early serial shell
         # starts, before OpenWrt's system service sets it to OpenWrt.
         vm.expect(r'root@[^:\r\n]+:[^\r\n]*#', timeout=90)
-        command(vm, ': > /tmp/artak-guest.b64')
-        for pos in range(0, len(encoded), 600):
-            command(vm, "printf '%s' '" + encoded[pos:pos + 600] + "' >> /tmp/artak-guest.b64")
-        command(vm, 'base64 -d /tmp/artak-guest.b64 > /tmp/artak-guest.sh')
+        def upload(local_name, guest_name):
+            encoded = base64.b64encode((ROOT / 'tests' / local_name).read_bytes()).decode('ascii')
+            command(vm, ': > /tmp/artak-guest.b64')
+            for pos in range(0, len(encoded), 600):
+                command(vm, "printf '%s' '" + encoded[pos:pos + 600] + "' >> /tmp/artak-guest.b64")
+            command(vm, 'base64 -d /tmp/artak-guest.b64 > ' + guest_name)
+        upload('amnezia_openwrt_guest.sh', '/tmp/artak-guest.sh')
+        upload('openwrt_fw4_guard.sh', '/tmp/artak-fw4.sh')
         command(vm, 'sh /tmp/artak-guest.sh', timeout=600)
         if 'AWG_VM_ALL_TESTS_PASSED' not in vm.before:
             raise RuntimeError('Guest completed without success marker')
         print('OpenWrt VM: both netifd/kernel AWG profiles passed')
+        command(vm, 'ARTAK_DISPOSABLE_VM=1 sh /tmp/artak-fw4.sh', timeout=120)
+        print('OpenWrt VM: stock firewall reload retained the independent test guard')
     except Exception:
         # Guest script uses generated throwaway keys and never prints them.
         print('OpenWrt guest serial tail:', str(vm.before)[-5000:], file=sys.stderr)
