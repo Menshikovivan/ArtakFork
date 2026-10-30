@@ -35,6 +35,8 @@ apk --allow-untrusted --simulate add /tmp/awg-tools.apk /tmp/awg-kmod.apk >/dev/
 apk --allow-untrusted add /tmp/awg-tools.apk /tmp/awg-kmod.apk >/dev/null
 modprobe amneziawg
 command -v awg >/dev/null
+# netifd may have loaded its protocol handlers before the package was added.
+/etc/init.d/network restart
 
 run_profile() {
     profile=$1
@@ -77,7 +79,13 @@ run_profile() {
     n=0
     while [ "$(ubus call network.interface.ata status | jsonfilter -e '@.up')" != true ] ||
           [ "$(ubus call network.interface.atb status | jsonfilter -e '@.up')" != true ]; do
-        n=$((n+1)); [ "$n" -lt 30 ] || { echo "netifd $profile readiness failed" >&2; exit 1; }
+        n=$((n+1)); [ "$n" -lt 30 ] || {
+            echo "netifd $profile readiness failed" >&2
+            ubus call network.interface.ata status || true
+            ubus call network.interface.atb status || true
+            logread | grep -E 'netifd|amneziawg' | tail -40 | sed -E 's/[A-Za-z0-9+\/]{42,43}=/[REDACTED]/g' || true
+            exit 1
+        }
         sleep 1
     done
     # The moved interface retains its UDP socket in its creation namespace.
