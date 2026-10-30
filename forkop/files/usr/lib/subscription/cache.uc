@@ -20,6 +20,9 @@ const TMP_SUBSCRIPTION_FOLDER = getenv("TMP_SUBSCRIPTION_FOLDER") || TMP_SING_BO
 const FORKOP_RUNTIME_STATE_DIR = getenv("FORKOP_RUNTIME_STATE_DIR") || "/var/run/forkop";
 const FORKOP_SUBSCRIPTION_UPDATE_STATE_DIR = getenv("FORKOP_SUBSCRIPTION_UPDATE_STATE_DIR") || FORKOP_RUNTIME_STATE_DIR + "/subscription-update";
 const FORKOP_SUBSCRIPTION_REPORT_FILE = getenv("FORKOP_SUBSCRIPTION_REPORT_FILE") || FORKOP_SUBSCRIPTION_UPDATE_STATE_DIR + "/last-report.json";
+// Candidates are isolated from active caches until an AWG runtime transaction
+// has successfully activated them. They are never served to sing-box or UI.
+const FORKOP_AWG_CANDIDATE_DIR = getenv("FORKOP_AWG_CANDIDATE_DIR") || "/etc/forkop/awg-subscription-candidates";
 const FORKOP_SUBSCRIPTION_LINKS_DIR = getenv("FORKOP_SUBSCRIPTION_LINKS_DIR") || FORKOP_RUNTIME_STATE_DIR + "/subscription-links";
 const FORKOP_SUBSCRIPTION_METADATA_DIR = getenv("FORKOP_SUBSCRIPTION_METADATA_DIR") || FORKOP_RUNTIME_STATE_DIR + "/subscription-metadata";
 const FORKOP_OUTBOUND_METADATA_DIR = getenv("FORKOP_OUTBOUND_METADATA_DIR") || FORKOP_RUNTIME_STATE_DIR + "/outbound-metadata";
@@ -1805,6 +1808,31 @@ function subscription_config_is_current(section_name_value, subscription_url, su
     return false;
 }
 
+// Stage only: this does not activate or advertise a tunnel. The source identity
+// must never be included in process arguments or logs. A private temporary
+// file supplies sha256sum with a path, not the subscription URL or HWID.
+function stage_awg_subscription_candidate(raw_path, source, url, user_agent, hwid) {
+    let data = fs.readfile(raw_path);
+    if (data == null) return 2;
+    let awg = require('subscription.amnezia_subscription');
+    let found = awg.extract(data);
+    if (!length(found.configs) && !found.invalid) return 1;
+    if (!awg.validated(data).ok) return 2;
+    if (!cache_section_is_safe(source)) return 2;
+    let identity_path = temp_path(TMP_SUBSCRIPTION_FOLDER, source, 'awg-identity');
+    if (!write_json(identity_path, [as_string(url), as_string(user_agent), as_string(hwid)])) {
+        unlink_path(identity_path);
+        return 2;
+    }
+    let digest = split(trim(command_output_from_args([ 'sha256sum', identity_path ])), /[ \t\r\n]+/)[0];
+    unlink_path(identity_path);
+    if (match(as_string(digest), /^[0-9a-f]{64}$/) == null) return 2;
+    ensure_dir(FORKOP_AWG_CANDIDATE_DIR);
+    if (!require('subscription.amnezia_store').save(FORKOP_AWG_CANDIDATE_DIR, source, digest, data))
+        return 2;
+    return 0;
+}
+
 function get_subscription_download_proxy_address(section_name_value, sections, parsed, phase) {
     let download_section = as_string(object_or_empty(parsed).download_section);
     if (download_section == "" || download_section == as_string(section_name_value))
@@ -1868,6 +1896,16 @@ function download_subscription_into_cache(section_name_value, subscription_url, 
 
         parser.extract_ui_metadata_file(headers_tmpfile, raw_tmpfile, metadata_tmpfile) || unlink_path(metadata_tmpfile);
         copy_valid_metadata_output(metadata_tmpfile, metadata_output_path);
+
+        // Capturing a validated candidate is separate from publishing the
+        // subscription or activating it. Invalid data leaves old candidates
+        // and the running tunnel untouched; mixed legacy proxies still import.
+        if (as_string(getenv('FORKOP_AWG_STAGE_CANDIDATES')) == '1' &&
+            subscription_config_is_current(section_name_value, subscription_url, subscription_user_agent, subscription_hwid, sections)) {
+            let awg_status = stage_awg_subscription_candidate(raw_tmpfile, cache_section, subscription_url, subscription_user_agent, subscription_hwid);
+            if (awg_status == 2)
+                log_message("AmneziaWG subscription candidate could not be staged; previous candidate retained", "warn");
+        }
 
         if (!parser.normalize_content_validated(raw_tmpfile, normalized_tmpfile)) {
             if (metadata_output_path != "")
@@ -2757,6 +2795,12 @@ function deferred_subscription_bootstrap_retry_worker(remaining_sections) {
 }
 
 let mode = ARGV[0] || "";
+if (mode == "stage-amnezia-candidate-fixture") {
+    if (as_string(getenv('FORKOP_AWG_STAGE_CANDIDATES')) != '1') exit(2);
+    ensure_dir(TMP_SUBSCRIPTION_FOLDER);
+    if (!common.secure_private_dir(TMP_SUBSCRIPTION_FOLDER)) exit(2);
+    exit(stage_awg_subscription_candidate(ARGV[1], ARGV[2], ARGV[3], ARGV[4], ARGV[5]));
+}
 if (mode == "change-report-fixture") {
     pending_change_report = [];
     remember_change_report("test_rule", 1, ARGV[1], ARGV[2], "updated");

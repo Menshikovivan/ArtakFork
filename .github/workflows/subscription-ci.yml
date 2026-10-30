@@ -64,12 +64,16 @@ jobs:
         shell: bash
         run: sudo bash tests/amnezia_oif_routing.sh
 
+      - name: Test pinned AmneziaWG dependency installer
+        shell: bash
+        run: python3 scripts/tests/test_awg_installer.py -v
+
       - name: Test service checks and subscription change reports
         shell: bash
         run: |
           set -uo pipefail
           result=0
-          for test in tests/service_check.uc tests/subscription_change_report.uc tests/amnezia_conf.uc tests/amnezia_subscription.uc tests/amnezia_subscription_pipeline.uc tests/amnezia_netifd.uc tests/amnezia_routes.uc tests/amnezia_import.uc; do
+          for test in tests/service_check.uc tests/subscription_change_report.uc tests/amnezia_conf.uc tests/amnezia_subscription.uc tests/amnezia_subscription_pipeline.uc tests/amnezia_netifd.uc tests/amnezia_routes.uc tests/amnezia_import.uc tests/network_redact.uc; do
             echo "Running $test"
             "$RUNNER_TEMP/ucode-build/ucode" \
               -L "$RUNNER_TEMP/ucode-build/*.so" \
@@ -92,7 +96,7 @@ jobs:
           chmod +x "$RUNNER_TEMP/ucode-bin/ucode"
           export PATH="$RUNNER_TEMP/ucode-bin:$PATH"
           result=0
-          for test in tests/list_cache.sh tests/google_gemini_inline.sh tests/urltest_empty_groups.sh tests/priority_reserve.sh tests/subscription_report_runtime.sh tests/amnezia_store.sh tests/amnezia_preflight_rpc.sh; do
+          for test in tests/list_cache.sh tests/google_gemini_inline.sh tests/urltest_empty_groups.sh tests/priority_reserve.sh tests/subscription_report_runtime.sh tests/amnezia_store.sh tests/amnezia_preflight_rpc.sh tests/amnezia_candidate.sh; do
             echo "Running $test"
             bash "$test" || result=1
           done

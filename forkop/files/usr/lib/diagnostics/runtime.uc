@@ -7,6 +7,7 @@ let core_ip = require("core.ip");
 let uci_core = require("core.uci");
 let runtime_dns = require("singbox.dns");
 let netstat = require("core.netstat");
+let network_redact = require("diagnostics.network_redact");
 
 const CONFIG_NAME = getenv("FORKOP_CONFIG_NAME") || constants.FORKOP_CONFIG_NAME || "forkop";
 const LIB_DIR = getenv("FORKOP_LIB") || "/usr/lib/forkop";
@@ -2221,7 +2222,7 @@ function global_check(arg1, arg2) {
     print_global("📄 WAN config");
     if (uci_show("network.wan")) {
         if (visibility == "raw")
-            print(as_string(fs.readfile("/etc/config/network")));
+            print(network_redact.mask(as_string(fs.readfile("/etc/config/network"))));
         else
             print(status_output([ "wan-config-masked", "/etc/config/network" ], null));
     }
@@ -2304,6 +2305,8 @@ function support_report_file(title, path) {
     }
 
     let text = as_string(data);
+    if (path == "/etc/config/network")
+        text = network_redact.mask(text);
     print(text);
     if (length(text) == 0 || substr(text, length(text) - 1) != "\n")
         print("\n");
@@ -2313,6 +2316,8 @@ function support_report() {
     print("⚠️ CONFIDENTIAL SUPPORT REPORT / КОНФИДЕНЦИАЛЬНЫЙ ОТЧЁТ ДЛЯ ПОДДЕРЖКИ\n\n");
     print("This file contains proxy and subscription URLs, UUIDs, passwords, keys, tokens, client domains and IP addresses, process command lines, and network configuration. Share it only with a trusted support specialist.\n\n");
     print("Файл содержит ссылки прокси и подписок, UUID, пароли, ключи, токены, домены и IP-адреса клиентов, параметры процессов и сетевую конфигурацию. Передавайте его только доверенному специалисту.\n\n");
+    print("WireGuard and AmneziaWG private, preshared, and header-protection keys in /etc/config/network are masked. Other sensitive data remains visible.\n\n");
+    print("Приватные ключи WireGuard и AmneziaWG, общие ключи и ключи защиты заголовка в /etc/config/network скрыты. Другие конфиденциальные данные остаются видимыми.\n\n");
     print("Generated: ", trim(command_output_from_args([ "date", "-Iseconds" ])), "\n");
     print("Forkop version: ", FORKOP_VERSION, "\n");
 
