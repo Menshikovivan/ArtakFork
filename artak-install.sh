@@ -124,7 +124,7 @@ set -u
 LOCK=/tmp/artak-awg-netifd-restart.lock
 trap 'rmdir "$LOCK" 2>/dev/null || true; rm -f "$0"' EXIT
 echo 'ArtakFork: waiting 5 seconds before restarting network.'
-sleep 5
+/bin/sleep 5
 if ! /etc/init.d/network restart; then
     echo 'ArtakFork: network restart failed; Forkop was not started.'
     exit 1
@@ -141,7 +141,7 @@ while [ "$n" -lt 90 ]; do
         exit 1
     fi
     n=$((n+1))
-    sleep 1
+    /bin/sleep 1
 done
 echo 'ArtakFork: AWG handler did not become available; Forkop was not started.'
 exit 1
