@@ -107,15 +107,18 @@ function prepare_and_execute(factory, dirs, source, old_id, identity, metadata, 
         try { ops = factory(ctx.lease, ctx.holds, staged.generation); } catch (e) { ops = null; }
         if (type(ops) != 'object' || !inner.current()) return {ok:false,error:'Transition operations unavailable',recovery_required:true};
         let checked = {};
-        for (let name in ['prepare','snapshot_revisions','install_union','verify_union','reload','verify_new',
-                          'restore_old','verify_old','discard_new','retire_old']) {
-            let n = name, operation = ops[n];
-            if (type(operation) != 'function') return {ok:false,error:'Transition operations unavailable',recovery_required:true};
-            checked[n] = function() {
+        function wrap(operation, allow_changed_source) {
+            return function() {
                 if (!ctx.holds()) return false;
-                if (n != 'restore_old' && n != 'verify_old' && n != 'discard_new' && !inner.current()) return false;
+                if (!allow_changed_source && !inner.current()) return false;
                 return operation();
             };
+        }
+        for (let name in ['prepare','snapshot_revisions','install_union','verify_union','reload','verify_new',
+                          'restore_old','verify_old','discard_new','retire_old']) {
+            let operation = ops[name];
+            if (type(operation) != 'function') return {ok:false,error:'Transition operations unavailable',recovery_required:true};
+            checked[name] = wrap(operation, name == 'restore_old' || name == 'verify_old' || name == 'discard_new');
         }
         if (type(ops.finalize_new) != 'function') return {ok:false,error:'Transition finalizer unavailable',recovery_required:true};
         checked.finalize_new = function() { return inner.current() && ctx.holds() && ops.finalize_new() === true; };

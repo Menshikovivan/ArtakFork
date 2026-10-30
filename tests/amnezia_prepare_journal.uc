@@ -94,9 +94,16 @@ let transition = require('subscription.amnezia_orchestrator').prepare_and_execut
     let hooks = {};
     for (let n in ['prepare','install_union','verify_union','reload','verify_new','restore_old','verify_old','discard_new','retire_old'])
         hooks[n] = function() { return holds(); };
+    hooks.finalize_new = function() { return holds(); };
     hooks.snapshot_revisions = function() { return {old:staged.generation, new:new_id}; };
     return hooks;
 }, {journal:journal4,generation:gen,candidate:cand,good}, 'source', staged.generation, id, metadata, 1000, transaction_opts);
+if (!transition.ok || generation.current_id(gen, 'source') == staged.generation ||
+    fs.stat(journal4 + '/source.prepare.json') != null || fs.stat(journal4 + '/source.swap.json') != null)
+    print('Prepared transition diagnostic: ', sprintf('%J', { result:transition,
+        unchanged:generation.current_id(gen, 'source') == staged.generation,
+        prepare_present:fs.stat(journal4 + '/source.prepare.json') != null,
+        swap_present:fs.stat(journal4 + '/source.swap.json') != null }), '\n');
 expect(transition.ok && generation.current_id(gen, 'source') != staged.generation &&
     fs.stat(journal4 + '/source.prepare.json') == null && fs.stat(journal4 + '/source.swap.json') == null,
     'end-to-end prepared update failed');
