@@ -13,8 +13,12 @@ assert startup.index('acquire_start_subscription_update_lock()') < startup.index
 assert startup.index('acquire_awg_network_lock()') < startup.index('amnezia-snapshot-build')
 assert startup.index('amnezia-snapshot-build') < startup.index('nft_candidate_begin()')
 assert startup.index('nft_candidate_finish(true)') < startup.index('singbox_init_config()') < startup.index('start_sing_box_and_wait()')
-assert "getenv('FORKOP_AWG_EXPERIMENTAL') == '1'" in startup
-assert "getenv('FORKOP_AWG_EXPERIMENTAL') != '1'" in rebuild
+assert "require('subscription.amnezia_feature').enabled()" in startup
+assert "require('subscription.amnezia_feature').enabled()" in rebuild
+assert "fs.stat(dir + '/snapshot.json') == null" in rebuild
+assert rebuild.index("fs.stat(dir + '/snapshot.json') == null") < rebuild.index('acquire_awg_network_lock()')
+assert rebuild.index('acquire_awg_network_lock()') < rebuild.index("require('subscription.amnezia_snapshot').load(dir)")
+assert 'if (s == null) return 1' in rebuild
 assert rebuild.index('acquire_awg_network_lock()') < rebuild.index('nft-add-awg-guards')
 assert text.rindex('release_awg_network_lock();') < text.rindex('exit(status);')
 assert "const AWG_NETWORK_LOCK_DIR = '/tmp/artak-awg-apply.lock'" in text
