@@ -99,6 +99,8 @@ run_profile() {
     echo "VM stage: testing $profile kernel tunnel"
     ip link set atb netns awg-peer
     ip -n awg-peer link set lo up
+    # Moving a netdevice between Linux namespaces removes its IP addresses.
+    ip -n awg-peer addr add 10.88.0.2/32 dev atb
     ip -n awg-peer link set atb up
     ip -n awg-peer route add 10.88.0.1/32 dev atb
     ip route add 10.88.0.2/32 dev ata
