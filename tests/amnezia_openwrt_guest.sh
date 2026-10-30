@@ -36,10 +36,13 @@ apk --allow-untrusted add /tmp/awg-tools.apk /tmp/awg-kmod.apk >/dev/null
 modprobe amneziawg
 command -v awg >/dev/null
 # netifd may have loaded its protocol handlers before the package was added.
-/etc/init.d/network restart
+echo 'VM stage: restarting netifd'
+if ! /etc/init.d/network restart; then echo 'VM stage: network restart returned failure' >&2; exit 1; fi
+echo 'VM stage: netifd restarted'
 
 run_profile() {
     profile=$1
+    echo "VM stage: configuring $profile"
     awg genkey >/tmp/key-a; awg pubkey </tmp/key-a >/tmp/pub-a
     awg genkey >/tmp/key-b; awg pubkey </tmp/key-b >/tmp/pub-b
     awg genkey >/tmp/key-header
@@ -74,8 +77,11 @@ run_profile() {
     uci set network.atpa.endpoint_port=29002; uci set network.atpb.endpoint_port=29001
     uci add_list network.atpa.allowed_ips=10.88.0.2/32; uci add_list network.atpb.allowed_ips=10.88.0.1/32
     uci commit network
+    echo "VM stage: reloading netifd for $profile"
     /etc/init.d/network reload
-    ifup ata; ifup atb
+    echo "VM stage: starting $profile peers"
+    ifup ata || { echo "ifup ata failed for $profile" >&2; exit 1; }
+    ifup atb || { echo "ifup atb failed for $profile" >&2; exit 1; }
     n=0
     while [ "$(ubus call network.interface.ata status | jsonfilter -e '@.up')" != true ] ||
           [ "$(ubus call network.interface.atb status | jsonfilter -e '@.up')" != true ]; do
@@ -90,6 +96,7 @@ run_profile() {
     done
     # The moved interface retains its UDP socket in its creation namespace.
     ip netns add awg-peer
+    echo "VM stage: testing $profile kernel tunnel"
     ip link set atb netns awg-peer
     ip -n awg-peer link set lo up
     ip -n awg-peer link set atb up
