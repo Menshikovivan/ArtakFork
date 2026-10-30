@@ -96,8 +96,9 @@ if [ "$state" != done ]; then
 fi
 iface=$(jsonfilter -i /tmp/e2e-status -e '@.name')
 case "$iface" in afawg_*) ;; *) echo 'invalid interface name' >&2; exit 1;; esac
-awg show "$iface" latest-handshakes | awk 'NR==1 && $2>0 {ok=1} END {exit !ok}'
-ip netns exec artak-e2e ping -c 3 -W 3 10.88.1.1 >/dev/null
+echo "E2E stage: import done, interface $iface"
+awg show "$iface" latest-handshakes | awk 'NR==1 && $2>0 {ok=1} END {exit !ok}' || { echo 'missing handshake after import' >&2; exit 1; }
+ip netns exec artak-e2e ping -c 3 -W 3 10.88.1.1 || { echo 'peer-to-imported interface ping failed' >&2; ip -n artak-e2e route show; ip link show "$iface"; exit 1; }
 
 echo 'E2E stage: apply Forkop lifecycle and verify guard/config'
 /etc/init.d/firewall start
