@@ -23,6 +23,7 @@ function apply(text, name, table, priority, timeout_ms, opts) {
     // pass paths derived from subscription content or unauthenticated input.
     if (!fs.mkdir(lock_dir)) return { ok: false, error: 'Another import is running or a stale lock exists' };
     let created_delta = false, cursor = null, names = [], snapshots = {}, committed = false;
+    function process() {
     try {
         // Standard UCI saved deltas are shared with LuCI and may be applied by
         // network reload. Refuse if present; this does not eliminate races.
@@ -71,10 +72,11 @@ function apply(text, name, table, priority, timeout_ms, opts) {
     catch (e) {
         return { ok: false, error: committed ? 'Apply failed after commit; inspect network configuration' : 'Apply failed before commit' };
     }
-    finally {
-        // UCI delta can contain key material; remove only our fixed path.
-        if (created_delta) { fs.unlink(delta + '/network'); fs.rmdir(delta); }
-        fs.rmdir(lock_dir);
     }
+    let result = process();
+    // UCI delta can contain key material; remove only our fixed path.
+    if (created_delta) { fs.unlink(delta + '/network'); fs.rmdir(delta); }
+    fs.rmdir(lock_dir);
+    return result;
 }
 return { apply };
