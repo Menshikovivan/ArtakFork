@@ -9,7 +9,7 @@ let config = { ok: true,
 let prepared = netifd.prepare(config, 'afawg_a1');
 let fixture = '[Interface]\nPrivateKey = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n' +
     'Address = 10.0.0.2/32\nJc = 4\nH1 = 100-200\nDisableCookies = on\n' +
-    '[Peer]\nPublicKey = BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=\n' +
+    '[Peer]\nPublicKey = BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA=\n' +
     'AllowedIPs = 0.0.0.0/0\nEndpoint = vpn.example:8443\n';
 let from_conf = netifd.prepare(parser.parse_conf(fixture), 'afawg_conf');
 expect(from_conf.ok && from_conf.iface.awg_disable_cookies == '1' && from_conf.peer.endpoint_port == '8443',

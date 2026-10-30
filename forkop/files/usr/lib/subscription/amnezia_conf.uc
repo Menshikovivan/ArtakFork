@@ -25,7 +25,9 @@ function has_control(value, allow_whitespace) {
     }
     return false;
 }
-function key_valid(v) { return type(v) == "string" && match(v, /^[A-Za-z0-9+\/]{43}=$/) != null; }
+// A 32-byte key has two zero pad bits in the last base64 character, as
+// enforced by amneziawg-tools key_from_base64().
+function key_valid(v) { return type(v) == "string" && match(v, /^[A-Za-z0-9+\/]{42}[AEIMQUYcgkosw048]=$/) != null; }
 function numbers(v, max, allow_range) {
     if (type(v) != "string" || match(v, allow_range ? /^[0-9]+(-[0-9]+)?$/ : /^[0-9]+$/) == null) return false;
     let parts = split(v, "-");
@@ -70,7 +72,15 @@ function parse_conf(text) {
     if (!have_interface || !key_valid(iface.private_key) || iface.addresses == null || length(peers) == 0)
         return failure("PrivateKey, Address and at least one peer are required");
     if (iface.awg_header_protection_key != null && !key_valid(iface.awg_header_protection_key)) return failure("Invalid header protection key");
-    if (iface.addresses != null) { iface.addresses = list_ip(iface.addresses); if (iface.addresses == null) return failure("Invalid interface address"); }
+    if (iface.addresses != null) {
+        iface.addresses = list_ip(iface.addresses);
+        if (iface.addresses == null) return failure("Invalid interface address");
+        // 2Grey netifd treats bare addresses as /32 or /128. Record that
+        // explicitly so readiness verification matches netifd status.
+        for (let i = 0; i < length(iface.addresses); i++)
+            if (index(iface.addresses[i], '/') < 0)
+                iface.addresses[i] += index(iface.addresses[i], ':') >= 0 ? '/128' : '/32';
+    }
     if (iface.dns != null) {
         iface.dns = list_ip(iface.dns);
         if (iface.dns == null) return failure("Invalid DNS address");
@@ -102,7 +112,9 @@ function parse_conf(text) {
             if (iface[name] == null || int(iface[name]) < 12) return failure("Header protection requires S1-S4 of at least 12");
     for (let peer in peers) {
         if (!key_valid(peer.public_key) || (peer.preshared_key != null && !key_valid(peer.preshared_key))) return failure("Invalid peer key");
-        peer.allowed_ips = peer.allowed_ips == null ? ["0.0.0.0/0", "::/0"] : list_ip(peer.allowed_ips);
+        // Upstream treats missing AllowedIPs as no permitted destinations;
+        // never silently broaden it to all IPv4 and IPv6 traffic.
+        peer.allowed_ips = peer.allowed_ips == null ? null : list_ip(peer.allowed_ips);
         if (peer.allowed_ips == null) return failure("Invalid allowed IPs");
         if (peer.persistent_keepalive == "off") delete peer.persistent_keepalive;
         if (peer.persistent_keepalive != null && !numbers(peer.persistent_keepalive, 65535, true)) return failure("Invalid keepalive");

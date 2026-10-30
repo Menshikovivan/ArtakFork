@@ -1,6 +1,6 @@
 let verifier = require('subscription.amnezia_verify');
 function expect(v, m) { if (!v) die(m + '\n'); }
-let peer = 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=', mode = '', ticks = 0;
+let peer = 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA=', mode = '', ticks = 0;
 function runner(args) {
     let value;
     if (args[0] == 'ubus') value = { up: mode != 'down', l3_device: 'afawg_a', 'ipv4-address': [{address:'10.0.0.2',mask:32}] };

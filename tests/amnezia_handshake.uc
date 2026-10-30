@@ -1,6 +1,6 @@
 let handshake = require('subscription.amnezia_handshake');
 function expect(v, m) { if (!v) die(m + '\n'); }
-let peer = 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=', ticks = 0, mode = '', calls = [];
+let peer = 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA=', ticks = 0, mode = '', calls = [];
 function now() { return ticks; }
 function pause(n) { ticks += n; }
 function wall() { return 10000; }

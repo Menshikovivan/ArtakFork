@@ -1,7 +1,7 @@
 let importer = require('subscription.amnezia_import');
 function expect(v, message) { if (!v) die(message + '\n'); }
 let fixture = '[Interface]\nPrivateKey = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n' +
-    'Address = 10.0.0.2/32\n[Peer]\nPublicKey = BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=\n' +
+    'Address = 10.0.0.2/32\n[Peer]\nPublicKey = BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA=\n' +
     'AllowedIPs = 0.0.0.0/0\nEndpoint = vpn.example:8443\n';
 let sections = { wan: { '.type': 'interface', proto: 'dhcp' } }, commits = 0, fail = '';
 let cursor = {

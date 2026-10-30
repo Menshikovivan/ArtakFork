@@ -9,7 +9,7 @@ function uri(value) {
 }
 
 let key = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
-let serverkey = 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=';
+let serverkey = 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA=';
 let base = '[Interface]\nPrivateKey = ' + key + '\nAddress = 10.8.1.2/32\n' +
     'Jc = 4\nJmin = 40\nJmax = 70\nS1 = 72\nS2 = 56\nS3 = 32\nS4 = 16\n' +
     'H1 = 100-110\nH2 = 200-210\nH3 = 300-310\nH4 = 400-410\nI1 = <r 148>\n';
