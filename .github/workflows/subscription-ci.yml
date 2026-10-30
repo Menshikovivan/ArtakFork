@@ -69,7 +69,7 @@ jobs:
         run: |
           set -uo pipefail
           result=0
-          for test in tests/service_check.uc tests/subscription_change_report.uc tests/amnezia_conf.uc tests/amnezia_subscription.uc tests/amnezia_netifd.uc; do
+          for test in tests/service_check.uc tests/subscription_change_report.uc tests/amnezia_conf.uc tests/amnezia_subscription.uc tests/amnezia_netifd.uc tests/amnezia_routes.uc; do
             echo "Running $test"
             "$RUNNER_TEMP/ucode-build/ucode" \
               -L "$RUNNER_TEMP/ucode-build/*.so" \
