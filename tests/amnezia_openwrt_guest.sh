@@ -3,7 +3,8 @@
 set -eu
 umask 077
 n=0
-while ! ip link show br-lan >/dev/null 2>&1; do
+while ! ip link show br-lan >/dev/null 2>&1 ||
+      [ "$(ubus call network.interface.lan status 2>/dev/null | jsonfilter -e '@.up')" != true ]; do
     n=$((n+1)); [ "$n" -lt 90 ] || { echo 'br-lan startup timed out' >&2; exit 1; }
     sleep 1
 done
