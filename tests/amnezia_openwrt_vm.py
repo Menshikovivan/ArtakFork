@@ -31,7 +31,9 @@ def main():
     try:
         vm.expect('Please press Enter to activate this console', timeout=180)
         vm.sendline('')
-        vm.expect(r'root@OpenWrt:[^\r\n]*#', timeout=90)
+        # The hostname may still be "(none)" when the early serial shell
+        # starts, before OpenWrt's system service sets it to OpenWrt.
+        vm.expect(r'root@[^:\r\n]+:[^\r\n]*#', timeout=90)
         command(vm, ': > /tmp/artak-guest.b64')
         for pos in range(0, len(encoded), 600):
             command(vm, "printf '%s' '" + encoded[pos:pos + 600] + "' >> /tmp/artak-guest.b64")
