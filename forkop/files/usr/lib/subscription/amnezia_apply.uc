@@ -110,6 +110,9 @@ function apply_internal(text, name, table, priority, timeout_ms, opts, lease) {
     }
     }
     let result = process();
+    // After commit, failures without a confirmed rollback require inspection.
+    if (committed && type(result) == 'object' && result.ok !== true && result.diagnostic == null)
+        result.cleanup_required = true;
     // UCI delta can contain key material; remove only our fixed path.
     if (created_delta && (!borrowed || valid_lease(lease))) { fs.unlink(delta + '/network'); fs.rmdir(delta); }
     if (!borrowed) fs.rmdir(lock_dir);

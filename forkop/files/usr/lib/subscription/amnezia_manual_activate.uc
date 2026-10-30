@@ -26,7 +26,7 @@ function activate(text, source, identity, dirs, opts) {
         if (type(chosen) != 'object' || chosen.ok !== true) return { ok: false, error: 'Cannot allocate interface' };
         if (opts.current() !== true) return { ok: false, error: 'Manual source changed' };
         let applied = session.apply(text, chosen.name, chosen.table, chosen.priority, 5000);
-        if (type(applied) != 'object' || applied.ok !== true) return { ok: false, error: 'Interface activation failed', diagnostic: applied?.diagnostic || 'activation_failed' };
+        if (type(applied) != 'object' || applied.ok !== true) return { ok: false, error: 'Interface activation failed', diagnostic: applied?.diagnostic || 'activation_failed', cleanup_required: type(applied) != 'object' || applied.cleanup_required === true };
         let cleanup = function() {
             try { let result = session.cleanup(text, chosen.name, chosen.table, chosen.priority); return result && result.ok === true; }
             catch (e) { return false; }
