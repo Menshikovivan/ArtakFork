@@ -34,6 +34,8 @@ import {
 } from '../../services/runtimeUiState.service';
 import { isActiveLuciTab } from '../../helpers/isActiveLuciTab';
 import { isTransientRpcError } from '../../helpers/isTransientRpcError';
+import { showSubscriptionChangeReport } from './subscriptionChangeReport';
+import { showServiceCheck } from './serviceCheck';
 import { shouldShowLoadingForRestoredAction } from '../../helpers/restoredActionLoading';
 import { getServiceAvailability } from '../../helpers/serviceAvailability';
 import {
@@ -327,12 +329,14 @@ async function completeSubscriptionUpdateJob(
   if (failed) {
     if (shouldNotify) {
       showToast(subscriptionUpdateErrorMessage(message), 'error');
+      void showSubscriptionChangeReport(jobId, false);
     }
     return;
   }
 
   if (shouldNotify) {
     showToast(_('Subscriptions updated'), 'success');
+    void showSubscriptionChangeReport(jobId, true);
   }
   void fetchDashboardSections({ force: true });
   void fetchServicesInfo();
@@ -1651,6 +1655,7 @@ async function renderSectionsWidget() {
       onShowPriorityInfo: (outbound) => {
         handleShowPriorityInfo(outbound);
       },
+      onCheckService: (outbound) => showServiceCheck(outbound),
       onUpdateSubscription: () => {
         void handleUpdateSubscription();
       },

@@ -6,7 +6,7 @@ on:
       version:
         description: Package and release version
         required: true
-        default: 2.4.3-canary.5
+        default: 2.4.3-canary.6
         type: string
 
 permissions:
@@ -53,10 +53,10 @@ jobs:
       - name: Build six release packages
         run: bash build.sh "$VERSION" "$PWD/filtered-bin/artak-release"
 
-      - name: Discover latest pinned upstream releases and preserve verified assets
+      - name: Preserve verified compatible pinned upstream releases
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/prepare_artak_bootstrap.py --output filtered-bin/artak-release
+        run: python3 scripts/prepare_artak_bootstrap.py --use-pinned --output filtered-bin/artak-release
 
       - name: Prepare installer and package checksums
         shell: bash
@@ -119,9 +119,9 @@ jobs:
           cat > "$RUNNER_TEMP/artak-release-notes.md" <<'EOF'
           ArtakFork is an independent source modification of Forkop X.
 
-          Changes: arbitrary HTTPS subscription providers are accepted; provider-specific subscription restrictions are removed. List publication now preserves and excludes unmanaged community files, allowing updated configurations with Discord and additional subscriptions to apply. The built-in Gemini / AI Studio preset routes five service domains through the VPN rule chosen in LuCI, with standard Forkop FakeIP DNS. The installer bootstraps the latest stable upstream Forkop and sing-box Extended versions pinned in its source, then installs ArtakFork.
+          ArtakFork improves diagnostics for empty URLTest groups, configured priority backups, service checks and subscription updates. See the README for behavior and limitations. The installer uses compatible pinned bootstrap packages, then installs ArtakFork.
 
-          The one-command installer supports stable OpenWrt 25.12 APK on aarch64_cortex-a53. Back up the router configuration before updating. The release contains six ArtakFork packages, three byte-preserved upstream Forkop APKs and one native Extended APK, package/source SHA-256 checksums and artak-install.sh. bootstrap-sources.json records original names, URLs, GitHub asset digests and source commits. CI refuses publication if the pinned upstream versions are no longer latest stable.
+          The one-command installer supports stable OpenWrt 25.12 APK on aarch64_cortex-a53. It uses upstream Forkop 1.0.5 and sing-box Extended 1.14.3-extended-2.7.3, pinned for compatibility; upstream Forkop 2.0 changes the engine and migration and is not used by this release. The release contains six ArtakFork packages, verified upstream APKs, sources and checksums. The installer backs up router configuration before installing.
 
           Attribution and corresponding source: upstream Forkop by ushan0v (https://github.com/ushan0v/forkop, GPL-2.0-or-later); Forkop X by Screamshow (https://github.com/Screamshow/forkop-x, GPL-2.0-or-later); sing-box Extended by shtorm-7 and contributors, based on SagerNet sing-box (https://github.com/shtorm-7/sing-box-extended, GPL-3.0-or-later with the upstream naming condition). Original notices and licenses remain in the attached upstream-forkop-source.tar.gz and sing-box-extended-source.tar.gz archives. The ArtakFork source at this release tag supplies the modified backend and build scripts. No association with upstream authors is implied.
 

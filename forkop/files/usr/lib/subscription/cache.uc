@@ -8,6 +8,7 @@ let connections = require("config.connections");
 let subscription_share_link = require("subscription.share_link");
 let filter_identity = require("subscription.filter_identity");
 let filter_selection = require("subscription.filter_selection");
+let change_report = require("subscription.change_report");
 let core_ip = require("core.ip");
 let core_url = require("core.url");
 
@@ -18,6 +19,7 @@ const TMP_RULESET_FOLDER = getenv("TMP_RULESET_FOLDER") || TMP_SING_BOX_FOLDER +
 const TMP_SUBSCRIPTION_FOLDER = getenv("TMP_SUBSCRIPTION_FOLDER") || TMP_SING_BOX_FOLDER + "/subscriptions";
 const FORKOP_RUNTIME_STATE_DIR = getenv("FORKOP_RUNTIME_STATE_DIR") || "/var/run/forkop";
 const FORKOP_SUBSCRIPTION_UPDATE_STATE_DIR = getenv("FORKOP_SUBSCRIPTION_UPDATE_STATE_DIR") || FORKOP_RUNTIME_STATE_DIR + "/subscription-update";
+const FORKOP_SUBSCRIPTION_REPORT_FILE = getenv("FORKOP_SUBSCRIPTION_REPORT_FILE") || FORKOP_SUBSCRIPTION_UPDATE_STATE_DIR + "/last-report.json";
 const FORKOP_SUBSCRIPTION_LINKS_DIR = getenv("FORKOP_SUBSCRIPTION_LINKS_DIR") || FORKOP_RUNTIME_STATE_DIR + "/subscription-links";
 const FORKOP_SUBSCRIPTION_METADATA_DIR = getenv("FORKOP_SUBSCRIPTION_METADATA_DIR") || FORKOP_RUNTIME_STATE_DIR + "/subscription-metadata";
 const FORKOP_OUTBOUND_METADATA_DIR = getenv("FORKOP_OUTBOUND_METADATA_DIR") || FORKOP_RUNTIME_STATE_DIR + "/outbound-metadata";
@@ -1104,6 +1106,48 @@ function subscription_import_stats_text(path) {
     return text;
 }
 
+// Only the update-request process publishes a report. Cache preparation and
+// startup never overwrite the result of an explicit update.
+let pending_change_report = null;
+function remember_change_report(section, source_index, previous_path, candidate_path, status) {
+    if (type(pending_change_report) != "array") return;
+    let candidate = object_or_empty(read_json(candidate_path));
+    let difference = change_report.compare(read_json(previous_path), candidate);
+    let reasons = object_or_empty(candidate.skip_reasons);
+    push(pending_change_report, {
+        section: safe_section(section) ? section : "[rule hidden]",
+        source: int(source_index || 0),
+        status: status,
+        baseline: difference.baseline,
+        added: difference.added,
+        removed: difference.removed,
+        changed: difference.changed,
+        skipped: int_or_zero(candidate.skipped),
+        skip_reasons: {
+            missing_protocol: int_or_zero(reasons.missing_protocol),
+            unsupported_protocol: int_or_zero(reasons.unsupported_protocol),
+            invalid_parameters: int_or_zero(reasons.invalid_parameters)
+        }
+    });
+}
+
+function remember_failed_report(section, source_index) {
+    if (type(pending_change_report) != "array") return;
+    push(pending_change_report, {
+        section: safe_section(section) ? section : "[rule hidden]",
+        source: int(source_index || 0), status: "failed",
+        baseline: false, added: [], removed: [], changed: [], skipped: 0,
+        skip_reasons: {}
+    });
+}
+
+function publish_change_report() {
+    ensure_dir(FORKOP_SUBSCRIPTION_UPDATE_STATE_DIR);
+    let tmp = FORKOP_SUBSCRIPTION_REPORT_FILE + ".tmp";
+    if (!write_json(tmp, { job_id: as_string(getenv("FORKOP_SUBSCRIPTION_REPORT_JOB_ID")), sources: pending_change_report || [] }) || !move_file(tmp, FORKOP_SUBSCRIPTION_REPORT_FILE))
+        unlink_path(tmp);
+}
+
 function subscription_source_summary(section_name_value, source_index, normalized_path, result) {
     let prefix = "Subscription source " + as_string(source_index) + " for rule '" + as_string(section_name_value) + "'";
     let stats = subscription_import_stats_text(normalized_path);
@@ -1856,10 +1900,12 @@ function download_subscription_into_cache(section_name_value, subscription_url, 
             unlink_path(headers_tmpfile);
             unlink_path(normalized_tmpfile);
             unlink_path(metadata_tmpfile);
+            remember_failed_report(section_name_value, source_index);
             return 1;
         }
 
         if (files_equal(normalized_tmpfile, subscription_json_path)) {
+            remember_change_report(section_name_value, source_index, subscription_json_path, normalized_tmpfile, "unchanged");
             write_text(subscription_url_cache_path, subscription_url);
             write_text(subscription_user_agent_cache_path, effective_user_agent);
             write_text(subscription_hwid_cache_path, effective_hwid);
@@ -1876,6 +1922,7 @@ function download_subscription_into_cache(section_name_value, subscription_url, 
         }
 
         if (file_nonempty(subscription_json_path) && parser.runtime_outbounds_equal(normalized_tmpfile, subscription_json_path)) {
+            remember_change_report(section_name_value, source_index, subscription_json_path, normalized_tmpfile, "unchanged");
             // Keep the already applied representation and outbound order. The
             // refreshed file differs only in metadata ignored by the runtime
             // comparison or in provider ordering, neither of which should
@@ -1895,12 +1942,16 @@ function download_subscription_into_cache(section_name_value, subscription_url, 
             return 2;
         }
 
+        let report_index = type(pending_change_report) == "array" ? length(pending_change_report) : -1;
+        remember_change_report(section_name_value, source_index, subscription_json_path, normalized_tmpfile, "updated");
         if (!move_file(normalized_tmpfile, subscription_json_path)) {
+            if (report_index >= 0 && length(pending_change_report) > report_index) pop(pending_change_report);
             if (metadata_output_path != "")
                 unlink_path(metadata_output_path);
             unlink_path(raw_tmpfile);
             unlink_path(headers_tmpfile);
             unlink_path(metadata_tmpfile);
+            remember_failed_report(section_name_value, source_index);
             return 1;
         }
 
@@ -1928,6 +1979,7 @@ function download_subscription_into_cache(section_name_value, subscription_url, 
         log_message("Configured subscription request profile for rule '" + section_name_value + "' did not produce valid proxy entries", "error");
     else
         log_message("No compatible subscription request profile produced valid proxy entries for rule '" + section_name_value + "'", "error");
+    remember_failed_report(section_name_value, source_index);
     return 1;
 }
 
@@ -1984,6 +2036,7 @@ function update_subscription_source(section_name_value, index_value, entry, phas
     let parsed = subscription_source_profile(section, entry);
     if (type(parsed) != "object" || parsed.valid !== true) {
         log_message("Invalid subscription URL in rule '" + section_name_value + "': " + as_string(parsed.error || "Invalid subscription source entry"), "error");
+        remember_failed_report(section_name_value, index);
         return 1;
     }
 
@@ -2287,6 +2340,7 @@ function subscription_update_request(force_value, target_section_name, target_so
     let force = as_string(force_value) == "1";
     let sections = uci_sections();
     let summary = empty_subscription_update_summary();
+    pending_change_report = [];
 
     target_section_name = as_string(target_section_name);
     target_source_index = as_string(target_source_index);
@@ -2296,6 +2350,7 @@ function subscription_update_request(force_value, target_section_name, target_so
             add_subscription_update_result(summary, subscription_update_selected_source(sections, target_section_name, target_source_index, force));
         else
             add_subscription_update_result(summary, subscription_update_section(find_section(sections, target_section_name), force));
+        publish_change_report();
         print_subscription_update_summary(summary);
         return;
     }
@@ -2303,6 +2358,7 @@ function subscription_update_request(force_value, target_section_name, target_so
     for (let section in sections)
         add_subscription_update_result(summary, subscription_update_section(section, force));
 
+    publish_change_report();
     print_subscription_update_summary(summary);
 }
 
@@ -2837,6 +2893,10 @@ else if (mode == "json-length") {
 }
 else if (mode == "subscription-import-stats") {
     print(subscription_import_stats_text(ARGV[1]), "\n");
+}
+else if (mode == "change-report") {
+    let report = read_json(FORKOP_SUBSCRIPTION_REPORT_FILE);
+    write_stdout_json(type(report) == "object" ? report : { sources: [] });
 }
 else if (mode == "subscription-source-summary") {
     print(subscription_source_summary(ARGV[1], ARGV[2], ARGV[3], ARGV[4]), "\n");

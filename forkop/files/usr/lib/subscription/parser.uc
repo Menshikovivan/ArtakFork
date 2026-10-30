@@ -1616,16 +1616,37 @@ function parse_clash_record(record) {
     return null;
 }
 
+function skipped_reason_for_scheme(scheme) {
+    scheme = lc(as_string(scheme));
+    if (scheme == "")
+        return "missing_protocol";
+    if (index([ "vmess", "vless", "ss", "shadowsocks", "trojan", "hysteria2", "hy2", "socks", "socks4", "socks5" ], scheme) < 0)
+        return "unsupported_protocol";
+    return "invalid_parameters";
+}
+
+function skipped_reason_for_link(line) {
+    let m = match(as_string(line), /^([A-Za-z][A-Za-z0-9+.-]*):\/\//);
+    return skipped_reason_for_scheme(m ? m[1] : "");
+}
+
+function count_skip_reason(reasons, reason) {
+    reasons[reason] = int(reasons[reason] || 0) + 1;
+}
+
 function normalize_clash_yaml(input_file, output_file) {
     let outbounds = [];
     let skipped = 0;
+    let skip_reasons = {};
 
     for (let record in clash_yaml_records(input_file)) {
         let outbound = parse_clash_record(record);
         if (outbound)
             push(outbounds, outbound);
-        else
+        else {
             skipped++;
+            count_skip_reason(skip_reasons, skipped_reason_for_scheme(record.type));
+        }
     }
 
     if (length(outbounds) == 0) {
@@ -1637,6 +1658,7 @@ function normalize_clash_yaml(input_file, output_file) {
         version: 1,
         format: "clash-yaml",
         skipped: skipped,
+        skip_reasons: skip_reasons,
         outbounds: outbounds
     });
 }
@@ -1652,6 +1674,7 @@ function normalize_uri_list_data(data, output_file) {
 
     let added = 0;
     let skipped = 0;
+    let skip_reasons = {};
     output.write("{\"version\":1,\"format\":\"uri-list\",\"outbounds\":[");
 
     for (let line in split(data, "\n")) {
@@ -1668,11 +1691,12 @@ function normalize_uri_list_data(data, output_file) {
             }
             else {
                 skipped++;
+                count_skip_reason(skip_reasons, skipped_reason_for_link(line));
             }
         }
     }
 
-    output.write("],\"skipped\":" + skipped + "}\n");
+    output.write("],\"skipped\":" + skipped + ",\"skip_reasons\":" + sprintf("%J", skip_reasons) + "}\n");
     output.close();
 
     if (added == 0) {
@@ -2034,6 +2058,7 @@ function normalize_uri_list_stream(input, output_file, strip_metadata) {
 
     let added = 0;
     let skipped = 0;
+    let skip_reasons = {};
     let line_no = 0;
     output.write("{\"version\":1,\"format\":\"uri-list\",\"outbounds\":[");
 
@@ -2055,11 +2080,12 @@ function normalize_uri_list_stream(input, output_file, strip_metadata) {
             }
             else {
                 skipped++;
+                count_skip_reason(skip_reasons, skipped_reason_for_link(line));
             }
         }
     }
 
-    output.write("],\"skipped\":" + skipped + "}\n");
+    output.write("],\"skipped\":" + skipped + ",\"skip_reasons\":" + sprintf("%J", skip_reasons) + "}\n");
     output.close();
 
     if (added == 0) {
