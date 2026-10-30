@@ -48,7 +48,11 @@ function execute_journaled(ops, journal_dir, generation_dir, source, old_id, new
         return { ok:false, error:'Cannot start journaled swap' };
     function phase(name) { return journal.write(journal_dir, source, old_id, new_id, name); }
     let wrapped = {
-        prepare: function() { return ops.prepare() === true; },
+        prepare: function() {
+            if (ops.prepare() !== true || type(ops.snapshot_revisions) != 'function') return false;
+            let snapshots = ops.snapshot_revisions();
+            return type(snapshots) == 'object' && journal.bind_snapshots(journal_dir, source, old_id, new_id, snapshots.old, snapshots.new);
+        },
         install_union: function() { return ops.install_union() === true && phase('union'); },
         verify_union: function() { return ops.verify_union() === true; },
         publish: function() { return gen.switch_to(generation_dir, source, old_id, new_id) && phase('published'); },

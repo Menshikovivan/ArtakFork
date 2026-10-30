@@ -23,4 +23,20 @@ if FORKOP_NFT_CANDIDATE_FAIL_PHASE=prepare ucode -L "$ROOT/forkop/files/usr/lib"
     echo 'Candidate preparation failure accepted' >&2; exit 1
 fi
 cmp "$WORK/before" "$FORKOP_NFT_BATCH_FILE"
+export ARTAK_SNAPSHOT_NEW_DIR="$WORK/new-snapshot"
+mkdir "$ARTAK_SNAPSHOT_NEW_DIR"
+NEW_REVISION=$(ucode -L "$ROOT/forkop/files/usr/lib" -e '
+let s=require("subscription.amnezia_snapshot");
+let result=s.save(getenv("ARTAK_SNAPSHOT_NEW_DIR"), [{index:0,name:"afawg_b",table:"16867",priority:"1002",mark:0x18000000 | 16867,source:"test",identity:"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",revision:"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}]);
+if (!result) die("new snapshot failed\n"); print(result.revision);
+')
+printf '# candidate union\n' > "$FORKOP_NFT_BATCH_FILE"
+ucode -L "$ROOT/forkop/files/usr/lib" "$ROOT/forkop/files/usr/lib/nft/apply.uc" nft-add-awg-union-guards ForkopTable "$ARTAK_SNAPSHOT_TEST_DIR" "$REVISION" "$ARTAK_SNAPSHOT_NEW_DIR" "$NEW_REVISION"
+grep -Fq 'meta mark == 0x180041e2 oifname != "afawg_a" counter drop' "$FORKOP_NFT_BATCH_FILE"
+grep -Fq 'meta mark == 0x180041e3 oifname != "afawg_b" counter drop' "$FORKOP_NFT_BATCH_FILE"
+cp "$FORKOP_NFT_BATCH_FILE" "$WORK/union-before"
+if ucode -L "$ROOT/forkop/files/usr/lib" "$ROOT/forkop/files/usr/lib/nft/apply.uc" nft-add-awg-union-guards ForkopTable "$ARTAK_SNAPSHOT_TEST_DIR" "$REVISION" "$ARTAK_SNAPSHOT_NEW_DIR" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; then
+    echo 'Changed new snapshot revision accepted' >&2; exit 1
+fi
+cmp "$WORK/union-before" "$FORKOP_NFT_BATCH_FILE"
 echo 'AWG guard is staged into the exact nft candidate snapshot'

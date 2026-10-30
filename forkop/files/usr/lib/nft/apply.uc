@@ -524,6 +524,25 @@ function nft_add_awg_guards(table, snapshot_dir, revision) {
     return true;
 }
 
+// Candidate staging only; callers must hold lifecycle locks, authenticate the
+// transition journal and discard the entire candidate if this returns false.
+// This does not itself publish a generation or authorize a live transition.
+function nft_add_awg_union_guards(table, old_dir, old_revision, new_dir, new_revision) {
+    if (NFT_BATCH_FILE == '' || !match(as_string(old_revision), /^[0-9a-f]{64}$/) ||
+        !match(as_string(new_revision), /^[0-9a-f]{64}$/)) return false;
+    let snapshot = require('subscription.amnezia_snapshot');
+    let a = snapshot.load(old_dir), b = snapshot.load(new_dir);
+    if (a == null || b == null || a.revision != old_revision || b.revision != new_revision) return false;
+    let union = require('subscription.amnezia_guard_union').plan(a.entries, b.entries, []);
+    if (!union.ok) return false;
+    for (let guard in union.guards)
+        if (!nft_insert_rule(table, 'mangle_output', ['meta', 'mark', '==', sprintf('0x%08x', guard.mark),
+            'oifname', '!=', '"' + guard.name + '"', 'counter', 'drop'])) return false;
+    // Reject snapshot replacement while the candidate was being prepared.
+    let after_a = snapshot.load(old_dir), after_b = snapshot.load(new_dir);
+    return after_a != null && after_b != null && after_a.revision == old_revision && after_b.revision == new_revision;
+}
+
 let LOCALV4_RANGES = [
     "0.0.0.0/8",
     "10.0.0.0/8",
@@ -2094,6 +2113,8 @@ else if (mode == "nft-create-runtime-base")
     exit(nft_create_runtime_base(ARGV[1], ARGV[2], ARGV[3], ARGV[4], ARGV[5], ARGV[6], ARGV[7], ARGV[8], ARGV[9], ARGV[10], ARGV[11], ARGV[12], ARGV[13], ARGV[14], ARGV[15], ARGV[16], ARGV[17]) ? 0 : 1);
 else if (mode == "nft-add-awg-guards")
     exit(nft_add_awg_guards(ARGV[1], ARGV[2], ARGV[3]) ? 0 : 1);
+else if (mode == "nft-add-awg-union-guards")
+    exit(nft_add_awg_union_guards(ARGV[1], ARGV[2], ARGV[3], ARGV[4], ARGV[5]) ? 0 : 1);
 else if (mode == "nft-create-runtime-base-from-uci")
     exit(nft_create_runtime_base_from_uci(ARGV[1], ARGV[2], ARGV[3], ARGV[4], ARGV[5], ARGV[6], ARGV[7], ARGV[8], ARGV[9], ARGV[10], ARGV[11], ARGV[12], ARGV[13], ARGV[14], ARGV[15]) ? 0 : 1);
 else if (mode == "nft-create-runtime-output-rules")

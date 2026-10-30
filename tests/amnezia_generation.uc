@@ -27,6 +27,7 @@ let second_id = generation.stage(gen, good, record, function() { return true; })
 expect(second_id != null && !generation.switch_to(gen, 'source', null, second_id), 'unexpected pointer overwrite');
 expect(journal.write(jdir, 'source', first_id, second_id, 'prepared'), 'journal prepare');
 expect(journal.recovery(jdir, gen, 'source').action == 'restore', 'prepared crash recovery');
+expect(journal.bind_snapshots(jdir, 'source', first_id, second_id, first_id, second_id), 'snapshot binding');
 expect(journal.write(jdir, 'source', first_id, second_id, 'union'), 'journal union');
 expect(generation.switch_to(gen, 'source', first_id, second_id), 'atomic pointer switch');
 expect(journal.recovery(jdir, gen, 'source').action == 'restore', 'crash between pointer and journal');
@@ -42,6 +43,7 @@ expect(fs.mkdir(jdir2), 'second journal fixture');
 let ops = {};
 for (let n in ['prepare','install_union','verify_union','reload','verify_new','restore_old','verify_old','discard_new','retire_old'])
     ops[n] = function() { return true; };
+ops.snapshot_revisions = function() { return {old:first_id, new:second_id}; };
 ops.retire_old = function() { return false; };
 let switched = swap.execute_journaled(ops, jdir2, gen, 'source', first_id, second_id);
 expect(switched.ok && switched.cleanup_required && generation.current_id(gen, 'source') == second_id && journal.read(jdir2, 'source').phase == 'verified', 'journaled swap');
