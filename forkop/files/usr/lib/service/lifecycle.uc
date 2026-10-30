@@ -732,6 +732,9 @@ function nft_rebuild_runtime(awg_union) {
         // The in-process swap factory already holds the AWG network lease.
         // A single-snapshot guard must not be added ahead of the union.
         if (type(awg_union.holds) != 'function' || awg_union.holds() !== true) return 1;
+        if (awg_union.single === true)
+            return module_status(NFT_UC, ['nft-add-awg-guards', NFT_TABLE_NAME,
+                awg_union.new_snapshot_dir, awg_union.new_snapshot]);
         return module_status(NFT_UC, ['nft-add-awg-union-guards', NFT_TABLE_NAME,
             awg_union.old_snapshot_dir, awg_union.old_snapshot,
             awg_union.new_snapshot_dir, awg_union.new_snapshot]);
@@ -835,6 +838,20 @@ function awg_nft_union_factory(ctx, lease, holds) {
     });
 }
 
+function awg_install_single_guard(ctx, lease, holds) {
+    if (type(ctx) != 'object' || type(lease?.valid) != 'function' || type(holds) != 'function' ||
+        holds() !== true || lease.valid() !== true || nft_candidate_batch_file != '') return false;
+    let spec = {single:true,new_snapshot_dir:ctx.new_snapshot_dir,new_snapshot:ctx.new_snapshot,holds};
+    if (!nft_candidate_begin()) return false;
+    if (nft_rebuild_runtime(spec) != 0 ||
+        (module_success(STATE_UC, ['has-list-update-sources']) &&
+         (!module_success(UPDATES_UC, ['runtime-list-cache-active']) || module_status(UPDATES_UC, ['apply-list-cache']) != 0)) ||
+        nft_populate_runtime_sets() != 0 || !nft_candidate_validate() || holds() !== true || lease.valid() !== true) {
+        nft_candidate_finish(false); return false;
+    }
+    return nft_candidate_finish(true, true);
+}
+
 function singbox_init_config() {
     let result = module_capture(SINGBOX_UC, [
         "init-config",
@@ -901,6 +918,237 @@ function restore_guarded_singbox_runtime(backup_path, guard_active) {
         NFT_TABLE_NAME,
         NFT_FAKEIP_MARK
     ]);
+}
+
+// Internal sing-box transition callbacks for a journaled AWG swap. The caller
+// holds lifecycle locks and supplies a live union guard verifier and an exact
+// generation/runtime verifier. Backup survives process death for recovery.
+function awg_singbox_swap_bridge(ctx, lease, holds, check_guard, check_generation) {
+    if (type(ctx) != 'object' || type(ctx.source) != 'string' ||
+        !match(ctx.source, /^[A-Za-z0-9_-]{1,100}$/) || type(ctx.old_generation) != 'string' ||
+        !match(ctx.old_generation, /^[0-9a-f]{64}$/) || type(lease) != 'object' ||
+        type(lease.valid) != 'function' || type(holds) != 'function' ||
+        type(check_guard) != 'function' || type(check_generation) != 'function') return null;
+    let base = '/etc/forkop/awg-swap-config';
+    let dir = base + '/' + ctx.source + '-' + ctx.old_generation;
+    let stage = dir + '/candidate.json', backup = dir + '/previous.json';
+    let stage_hash = dir + '/candidate.sha256', old_hash = dir + '/previous.sha256';
+    let cache_transaction = require('subscription.amnezia_cache_transaction');
+    let stopped = false;
+    function hash(path) {
+        let value = split(trim(command_output_from_args(['sha256sum', path])), /[ \t\r\n]+/)[0];
+        return match(as_string(value), /^[0-9a-f]{64}$/) ? value : '';
+    }
+    function live_hash() { return hash(config_get(CONFIG_NAME + '.settings.config_path', '')); }
+    function provenance() {
+        let result = module_capture(STATE_UC, ['sing-box-runtime-provenance']), parsed;
+        if (result.status != 0) return '';
+        try { parsed = json(result.output); } catch (e) { return ''; }
+        if (type(parsed) != 'object' || !match(as_string(parsed.pid), /^[0-9]+$/) ||
+            !match(as_string(parsed.start_ticks), /^[0-9]+$/)) return '';
+        return as_string(parsed.pid) + ':' + as_string(parsed.start_ticks);
+    }
+    function record_provenance(which) {
+        let value = provenance();
+        return value != '' && require('core.common').write_private_file(dir + '/' + which + '.process', value + '\n') != null;
+    }
+    function safe() {
+        try { return holds() === true && lease.valid() === true && check_guard() === true; }
+        catch (e) { return false; }
+    }
+    function ready() {
+        return module_status(STATE_UC, ['wait-forkop-stable-start', RT_TABLE_NAME, NFT_TABLE_NAME,
+            NFT_FAKEIP_MARK, as_string(SING_BOX_START_STABLE_MIN_AGE), as_string(SING_BOX_START_VERIFY_TIMEOUT)]) == 0;
+    }
+    function prepare_old() {
+        try {
+            if (!safe() || !require('core.common').secure_private_dir(base) || !fs.mkdir(dir, 0700) || !fs.chmod(dir, 0700)) return false;
+            let previous = live_hash();
+            return previous != '' && require('core.common').write_private_file(old_hash, previous + '\n') != null &&
+                ready() && safe() && record_provenance('old') && check_generation('old') === true;
+        } catch (e) { return false; }
+    }
+    function reload_new() {
+        try {
+            if (fs.stat(old_hash) == null && !prepare_old()) return false;
+            if (!safe() || fs.stat(stage) != null || singbox_prepare_config_stage(stage) != 0 || !safe()) return false;
+            if (!cache_transaction.capture(dir, SECTION_CACHE_DIR, stage + '.section-cache') || !safe()) return false;
+            let candidate = hash(stage), previous = live_hash();
+            if (candidate == '' || previous == '' || previous != trim(fs.readfile(old_hash) || '') ||
+                require('core.common').write_private_file(stage_hash, candidate + '\n') == null) return false;
+            if (module_status(STATE_UC, ['stop-managed-sing-box-runtime', as_string(getenv('FORKOP_SING_BOX_RELOAD_PID_TIMEOUT') || '15')]) != 0) return false;
+            stopped = true;
+            if (!safe() || !module_success(SINGBOX_UC, ['validate-config-stage', stage]) || !safe()) return false;
+            if (!module_success(SINGBOX_UC, ['commit-config-stage', stage, backup]) || !safe()) return false;
+            if (!cache_transaction.verify(dir, SECTION_CACHE_DIR, 'new')) return false;
+            if (module_status(STATE_UC, ['start-managed-sing-box-runtime', as_string(getenv('FORKOP_SING_BOX_RELOAD_PID_TIMEOUT') || '15')]) != 0) return false;
+            stopped = false;
+            return ready() && live_hash() == candidate && safe() && record_provenance('new');
+        } catch (e) { return false; }
+    }
+    function restore_old() {
+        try {
+            if (!safe()) return false;
+            if (module_status(STATE_UC, ['stop-managed-sing-box-runtime', as_string(getenv('FORKOP_SING_BOX_RELOAD_PID_TIMEOUT') || '15')]) != 0) return false;
+            stopped = true;
+            if (!safe()) return false;
+            if (fs.stat(dir + '/cache-ready') != null) {
+                if (!cache_transaction.restore(dir, SECTION_CACHE_DIR, function(path) {
+                    return module_success(SINGBOX_UC, ['publish-section-cache', path]);
+                })) return false;
+            } else if (fs.stat(stage_hash) != null || fs.stat(backup) != null) {
+                // No commit can occur before the cache checkpoint and hashes.
+                // Any contradictory state needs inspection, not guesswork.
+                return false;
+            }
+            if (fs.stat(backup) != null) {
+                let copy = dir + '/restore-copy.json';
+                if (!safe() || !command_success_from_args(['cp', '-p', backup, copy]) || !fs.chmod(copy, 0600) ||
+                    !module_success(SINGBOX_UC, ['restore-config-stage', copy])) return false;
+            }
+            if (stopped || !module_success(STATE_UC, ['single-ready-sing-box-runtime'])) {
+                if (!stopped && module_status(STATE_UC, ['stop-managed-sing-box-runtime', as_string(getenv('FORKOP_SING_BOX_RELOAD_PID_TIMEOUT') || '15')]) != 0) return false;
+                if (!safe() || module_status(STATE_UC, ['start-managed-sing-box-runtime', as_string(getenv('FORKOP_SING_BOX_RELOAD_PID_TIMEOUT') || '15')]) != 0) return false;
+                stopped = false;
+            }
+            let expected = trim(fs.readfile(old_hash) || '');
+            return match(expected, /^[0-9a-f]{64}$/) != null && ready() && live_hash() == expected && safe() && record_provenance('old');
+        } catch (e) { return false; }
+    }
+    function verify(which) {
+        try {
+            let path = which == 'old' ? old_hash : stage_hash;
+            let expected = trim(fs.readfile(path) || '');
+            let saved_process = trim(fs.readfile(dir + '/' + which + '.process') || '');
+            let cache_ok = which == 'old' && fs.stat(dir + '/cache-ready') == null ? true :
+                cache_transaction.verify(dir, SECTION_CACHE_DIR, which);
+            return safe() && match(expected, /^[0-9a-f]{64}$/) != null && live_hash() == expected &&
+                saved_process != '' && provenance() == saved_process &&
+                cache_ok &&
+                module_success(STATE_UC, ['single-ready-sing-box-runtime']) && check_generation(which) === true && safe();
+        } catch (e) { return false; }
+    }
+    function resume_new() {
+        try {
+            if (verify('new')) return true;
+            let expected = trim(fs.readfile(stage_hash) || '');
+            if (!safe() || !match(expected, /^[0-9a-f]{64}$/) || live_hash() != expected ||
+                !cache_transaction.verify(dir, SECTION_CACHE_DIR, 'new')) return false;
+            let timeout = as_string(getenv('FORKOP_SING_BOX_RELOAD_PID_TIMEOUT') || '15');
+            if (module_status(STATE_UC, ['stop-managed-sing-box-runtime', timeout]) != 0 || !safe() ||
+                !module_success(SINGBOX_UC, ['validate-config-stage', config_get(CONFIG_NAME + '.settings.config_path', '')]) ||
+                !safe() || module_status(STATE_UC, ['start-managed-sing-box-runtime', timeout]) != 0) return false;
+            return ready() && live_hash() == expected && safe() && record_provenance('new') && verify('new');
+        } catch (e) { return false; }
+    }
+    return { prepare_old, reload:reload_new, restore_old, resume_new, verify_old:function() { return verify('old'); },
+        verify_new:function() { return verify('new'); }, backup_dir:dir };
+}
+
+// Build actual in-process ops for one queued subscription swap. This function
+// is called only from the locked orchestrator, never from an RPC request.
+function awg_production_swap_factory(source, identity, old_id, new_id, dirs, lease, holds, recovering) {
+    if (type(source) != 'string' || !match(source, /^[A-Za-z0-9_-]{1,100}$/) ||
+        type(identity) != 'string' || !match(identity, /^[0-9a-f]{64}$/) ||
+        type(old_id) != 'string' || !match(old_id, /^[0-9a-f]{64}$/) ||
+        type(new_id) != 'string' || !match(new_id, /^[0-9a-f]{64}$/) ||
+        type(holds) != 'function' || holds() !== true || lease.valid() !== true) return null;
+    let snapshot = require('subscription.amnezia_snapshot');
+    let journal = require('subscription.amnezia_swap_journal');
+    let check = require('subscription.amnezia_lifecycle_swap');
+    let gen = require('subscription.amnezia_generation');
+    let store = require('subscription.amnezia_store');
+    let ctx = {source,old_generation:old_id,new_generation:new_id,journal_dir:dirs.journal,generation_dir:dirs.generation};
+    let pair = null, nft = null, bridge = null;
+    function attach_pair(value) {
+        if (type(value) != 'object' || type(value.old) != 'string' || type(value.new) != 'string' ||
+            !match(value.old, /^[0-9a-f]{64}$/) || !match(value.new, /^[0-9a-f]{64}$/)) return false;
+        pair = value;
+        ctx.old_snapshot = pair.old; ctx.new_snapshot = pair.new;
+        ctx.old_snapshot_dir = '/etc/forkop/awg-swap-snapshots/' + pair.old;
+        ctx.new_snapshot_dir = '/etc/forkop/awg-swap-snapshots/' + pair.new;
+        let a = snapshot.load(ctx.old_snapshot_dir), b = snapshot.load(ctx.new_snapshot_dir);
+        if (a == null || b == null || a.revision != pair.old || b.revision != pair.new) return false;
+        nft = awg_nft_union_factory(ctx, lease, holds);
+        bridge = awg_singbox_swap_bridge(ctx, lease, holds, guard_ok, generation_ok);
+        return nft != null && bridge != null;
+    }
+    function guard_ok() {
+        if (holds() !== true || !lease.valid() || pair == null) return false;
+        let j = journal.read(dirs.journal, source);
+        if (j == null) return false;
+        if (j.phase == 'prepared') {
+            let s = snapshot.load(ctx.old_snapshot_dir);
+            if (s == null || s.revision != pair.old) return false;
+            let v = require('subscription.amnezia_guard').verify(s.entries, s.revision, {snapshot_dir:ctx.old_snapshot_dir});
+            return type(v) == 'object' && v.ok === true;
+        }
+        let v = require('subscription.amnezia_guard_union_verify').verify(dirs.journal, dirs.generation, source,
+            ctx.old_snapshot_dir, ctx.new_snapshot_dir, {});
+        return type(v) == 'object' && v.ok === true;
+    }
+    function generation_ok(which) {
+        if (holds() !== true || !lease.valid() || pair == null) return false;
+        let id = which == 'old' ? old_id : new_id;
+        let path = which == 'old' ? ctx.old_snapshot_dir : ctx.new_snapshot_dir;
+        return check.verify_generation(source, identity, id, dirs, path, config_get(CONFIG_NAME + '.settings.config_path', ''));
+    }
+    function clean_generation(id, verify_other) {
+        let record = gen.read_generation(dirs.generation, source, id);
+        if (record == null || record.identity != identity) return false;
+        let profiles = store.load_configs(dirs.good + '/' + record.revision, source, identity);
+        if (type(profiles) != 'array') return false;
+        for (let entry in record.entries) {
+            if (holds() !== true || !lease.valid() || verify_other() !== true) return false;
+            let c = require('uci').cursor();
+            if (!c || c.load('network') == null) return false;
+            let names = [entry.name,entry.name + '_peer',entry.name + '_rt4',entry.name + '_rl4',entry.name + '_deny4',
+                entry.name + '_rt6',entry.name + '_rl6',entry.name + '_deny6'];
+            let found = 0;
+            for (let name in names) if (c.get('network', name) != null) found++;
+            if (found == 0) continue;
+            let cleaned = lease.cleanup(profiles[entry.index], entry.name, entry.table, entry.priority);
+            if (type(cleaned) != 'object' || cleaned.ok !== true || verify_other() !== true) return false;
+        }
+        return true;
+    }
+    function prepare() {
+        if (holds() !== true || !lease.valid() || !check.current_rule(source, identity, dirs)) return false;
+        let work = trim(command_output_from_args(['mktemp','-d','/tmp/artak-awg-swap.XXXXXX']));
+        if (!match(work, /^\/tmp\/artak-awg-swap\.[A-Za-z0-9]+$/) || !fs.chmod(work, 0700)) return false;
+        let build_dirs = {generation:dirs.generation,active:dirs.active,candidate:dirs.candidate,good:dirs.good,
+            temp_old:work + '/old',temp_new:work + '/new',snapshot_base:'/etc/forkop/awg-swap-snapshots'};
+        pair = require('subscription.amnezia_snapshot_sources').build_pair(require('uci').cursor(), build_dirs,
+            source, identity, old_id, new_id, [], 3000);
+        if (pair == null || holds() !== true || !lease.valid()) return false;
+        return attach_pair(pair) && bridge.prepare_old();
+    }
+    if (recovering === true) {
+        let saved = journal.read(dirs.journal, source);
+        if (saved == null || saved.old_generation != old_id || saved.new_generation != new_id ||
+            !attach_pair({old:saved.old_snapshot,new:saved.new_snapshot})) return null;
+    }
+    return {
+        prepare,
+        snapshot_revisions:function() { return pair; },
+        install_union:function() { return nft != null && nft.install_union(); },
+        verify_union:function() { return nft != null && nft.verify_union(); },
+        reload:function() { return bridge != null && bridge.reload(); },
+        verify_new:function() { return bridge != null && (bridge.verify_new() || (recovering === true && bridge.resume_new())); },
+        restore_old:function() { return bridge != null && bridge.restore_old(); },
+        verify_old:function() { return bridge != null && bridge.verify_old(); },
+        discard_new:function() { return bridge != null && clean_generation(new_id, bridge.verify_old); },
+        retire_old:function() { return bridge != null && clean_generation(old_id, bridge.verify_new); },
+        finalize_new:function() {
+            if (bridge == null || !bridge.verify_new() || holds() !== true || !lease.valid()) return false;
+            let s = snapshot.load(ctx.new_snapshot_dir);
+            let global_dir = getenv('FORKOP_AWG_SNAPSHOT_DIR') || '/etc/forkop/awg-snapshot';
+            if (s == null || s.revision != pair.new) return false;
+            let saved = snapshot.save(global_dir, s.entries);
+            if (saved == null || saved.revision != pair.new || !awg_install_single_guard(ctx, lease, holds)) return false;
+            return bridge.verify_new();
+        },
+    };
 }
 
 function refresh_cron() {
@@ -2352,6 +2600,28 @@ function disable_service() {
     return command_status_from_args([ SERVICE_INIT, "disable" ]);
 }
 
+function awg_swap_job(source) {
+    if (!require('subscription.amnezia_feature').enabled() || type(source) != 'string' ||
+        !match(source, /^[A-Za-z0-9_-]{1,100}$/)) return 1;
+    let dirs = {
+        queue:'/etc/forkop/awg-swap-queue', journal:'/etc/forkop/awg-swap-journal',
+        generation:'/etc/forkop/awg-generations', candidate:'/etc/forkop/awg-subscription-candidates',
+        good:'/etc/forkop/awg-last-good', active:'/etc/forkop/awg-active',
+    };
+    let queue = require('subscription.amnezia_swap_queue');
+    let check = require('subscription.amnezia_lifecycle_swap');
+    let result = require('subscription.amnezia_swap_job').run(source, dirs, {
+        lib:LIB_DIR,
+        matches_rule:function(name, identity) { return check.current_rule(name, identity, dirs); },
+        factory:function(lease, holds, new_id) {
+            let request = queue.read(dirs.queue, source);
+            if (request == null) return null;
+            return awg_production_swap_factory(source, request.identity, request.old_generation, new_id, dirs, lease, holds);
+        },
+    });
+    return type(result) == 'object' && result.ok === true && !result.cleanup_required ? 0 : 1;
+}
+
 let mode = ARGV[0] || "";
 let status = 1;
 
@@ -2373,6 +2643,8 @@ else if (mode == "restart")
     status = restart();
 else if (mode == "manual-restart")
     status = manual_restart();
+else if (mode == "awg-swap-job")
+    status = awg_swap_job(ARGV[1] || '');
 else if (mode == "refresh-rulesets-after-start") {
     refresh_rulesets_after_start();
     status = 0;

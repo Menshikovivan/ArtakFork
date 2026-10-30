@@ -12,7 +12,7 @@ function read(dir, source) {
     if (type(data) != 'string' || length(data) > 4096) return null;
     try { r = json(data); } catch (e) { return null; }
     if (type(r) != 'object' || r.version != 1 || r.source != source || !hash_ok(r.old_generation) ||
-        !hash_ok(r.new_generation) || r.old_generation == r.new_generation || index(phases, r.phase) < 0) return null;
+        !hash_ok(r.new_generation) || r.old_generation == r.new_generation || (index(phases, r.phase) < 0 && r.phase != 'rollback')) return null;
     if ((r.old_snapshot != null || r.new_snapshot != null) && (!hash_ok(r.old_snapshot) || !hash_ok(r.new_snapshot))) return null;
     if (r.phase != 'prepared' && (!hash_ok(r.old_snapshot) || !hash_ok(r.new_snapshot))) return null;
     return { version:1, source, old_generation:r.old_generation, new_generation:r.new_generation,
@@ -44,6 +44,20 @@ function bind_snapshots(dir, source, old_id, new_id, old_snapshot, new_snapshot)
     if (!fs.rename(tmp, dir + '/' + source + '.swap.json')) { fs.unlink(tmp); return false; }
     return true;
 }
+// Mark rollback durably before restoring the old pointer. A process crash in
+// between is fail-closed until recovery restores the pointer and old guard.
+function mark_rollback(dir, source, old_id, new_id) {
+    let prior = read(dir, source);
+    if (prior == null || prior.old_generation != old_id || prior.new_generation != new_id ||
+        index(['union','published','verified','rollback'], prior.phase) < 0 ||
+        !hash_ok(prior.old_snapshot) || !hash_ok(prior.new_snapshot)) return false;
+    if (prior.phase == 'rollback') return true;
+    prior.phase = 'rollback';
+    let t = clock(), tmp = sprintf('%s/.journal-%s-%d-%d.tmp', dir, source, t[0], t[1]);
+    if (common.write_private_json_file(tmp, prior) == null) { fs.unlink(tmp); return false; }
+    if (!fs.rename(tmp, dir + '/' + source + '.swap.json')) { fs.unlink(tmp); return false; }
+    return true;
+}
 function recovery(dir, generation_dir, source) {
     let journal = read(dir, source);
     if (journal == null) return null;
@@ -61,4 +75,4 @@ function clear(dir, source, old_id, new_id, verify) {
     try { if (verify() !== true) return false; } catch (e) { return false; }
     return fs.unlink(dir + '/' + source + '.swap.json') === true;
 }
-return { read, write, bind_snapshots, recovery, clear };
+return { read, write, bind_snapshots, mark_rollback, recovery, clear };

@@ -18,6 +18,8 @@ function make_rule(entry) { return {rule:{family:'inet',table:'ForkopTable',chai
  {match:{op:'!=',left:{meta:{key:'oifname'}},right:entry.name}}, {counter:{}}, {drop:null}]}}; }
 function runner() {
     let rules = [make_rule(e1), make_rule(e2)];
+    if (state == 'retired_single' || state == 'retired_bad_global') rules = [make_rule(e2)];
+    if (state == 'retired_extra') rules = [make_rule(e2), make_rule(e1)];
     if (state == 'missing') pop(rules);
     if (state == 'wrong') rules[1].rule.expr[1].match.right = 'wan';
     if (state == 'bypass') rules[0].rule.expr = [{accept:null}];
@@ -32,4 +34,20 @@ for (let mode in ['missing','wrong','bypass','changed']) {
 state = ''; count = 0;
 opts.current_id = function() { return b; };
 expect(!verify.verify('journal','generation','src','old','new',opts).ok, 'wrong generation pointer');
+opts.read_journal = function() { return {source:'src',old_generation:a,new_generation:b,old_snapshot:c,new_snapshot:d,phase:'rollback'}; };
+opts.current_id = function() { return a; };
+expect(verify.verify('journal','generation','src','old','new',opts).ok, 'rollback old generation accepted');
+opts.current_id = function() { return b; };
+expect(!verify.verify('journal','generation','src','old','new',opts).ok, 'rollback before pointer restore rejected');
+opts.read_journal = function() { return {source:'src',old_generation:a,new_generation:b,old_snapshot:c,new_snapshot:d,phase:'retired'}; };
+opts.global_snapshot_dir = 'global';
+opts.load = function(dir) {
+ if (dir == 'old') return {revision:c,entries:[e1]};
+ if (dir == 'global' && state == 'retired_bad_global') return {revision:c,entries:[e1]};
+ return {revision:d,entries:[e2]};
+};
+state = ''; expect(verify.verify('journal','generation','src','old','new',opts).ok, 'retired full union accepted');
+state = 'retired_single'; expect(verify.verify('journal','generation','src','old','new',opts).ok, 'retired new-only guard accepted');
+state = 'retired_bad_global'; expect(!verify.verify('journal','generation','src','old','new',opts).ok, 'wrong global snapshot rejected');
+state = 'retired_extra'; expect(!verify.verify('journal','generation','src','old','new',opts).ok, 'stale old guard rejected');
 print('Journaled AWG union guard verification checks passed\n');

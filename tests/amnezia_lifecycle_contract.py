@@ -19,7 +19,7 @@ assert "fs.stat(dir + '/snapshot.json') == null" in rebuild
 assert rebuild.index("fs.stat(dir + '/snapshot.json') == null") < rebuild.index('acquire_awg_network_lock()')
 assert rebuild.index('acquire_awg_network_lock()') < rebuild.index("require('subscription.amnezia_snapshot').load(dir)")
 assert 'if (s == null) return 1' in rebuild
-assert rebuild.index('acquire_awg_network_lock()') < rebuild.index('nft-add-awg-guards')
+assert rebuild.index('acquire_awg_network_lock()') < rebuild.rindex('nft-add-awg-guards')
 assert text.rindex('release_awg_network_lock();') < text.rindex('exit(status);')
 assert "const AWG_NETWORK_LOCK_DIR = '/tmp/artak-awg-apply.lock'" in text
 print('AWG lifecycle ordering and opt-in checks passed')

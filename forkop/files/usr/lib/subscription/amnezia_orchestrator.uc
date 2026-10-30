@@ -4,7 +4,6 @@
 // lease passed to the hook factory and must not recursively invoke reload.
 let fs = require('fs');
 let swap = require('subscription.amnezia_swap');
-let apply = require('subscription.amnezia_apply');
 function quote(s) { return "'" + replace(s, /'/g, "'\\''") + "'"; }
 function pid() {
     let stat = fs.readfile('/proc/self/stat');
@@ -41,7 +40,8 @@ function real_locks(opts) {
     }
     return { acquire_reload:function() { return acquire(reload); }, acquire_subscription:function() { return acquire(subscription); },
         release_subscription:function() { return release(subscription); }, release_reload:function() { return release(reload); },
-        owned:function() { return owned(reload) && owned(subscription); }, with_awg:apply.with_lock };
+        owned:function() { return owned(reload) && owned(subscription); },
+        with_awg:function(options, callback) { return require('subscription.amnezia_apply').with_lock(options, callback); } };
 }
 function guarded(factory, opts, run) {
     if (type(factory) != 'function' || type(run) != 'function') return {ok:false,error:'Invalid transition request'};
@@ -117,6 +117,8 @@ function prepare_and_execute(factory, dirs, source, old_id, identity, metadata, 
                 return operation();
             };
         }
+        if (type(ops.finalize_new) != 'function') return {ok:false,error:'Transition finalizer unavailable',recovery_required:true};
+        checked.finalize_new = function() { return inner.current() && ctx.holds() && ops.finalize_new() === true; };
         return swap.execute_journaled(checked, dirs.journal, dirs.generation, source, old_id, staged.generation);
     });
 }

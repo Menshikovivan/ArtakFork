@@ -63,6 +63,7 @@ function execute_journaled(ops, journal_dir, generation_dir, source, old_id, new
         reload: function() { return ops.reload() === true; },
         verify_new: function() { return ops.verify_new() === true && phase('verified'); },
         restore_old: function() {
+            if (!journal.mark_rollback(journal_dir, source, old_id, new_id)) return false;
             let current = gen.current_id(generation_dir, source);
             if (current == new_id && !gen.switch_to(generation_dir, source, new_id, old_id)) return false;
             if (current != old_id && current != new_id) return false;
@@ -70,7 +71,10 @@ function execute_journaled(ops, journal_dir, generation_dir, source, old_id, new
         },
         verify_old: function() { return ops.verify_old() === true; },
         discard_new: function() { return ops.discard_new() === true; },
-        retire_old: function() { return ops.retire_old() === true && phase('retired'); }
+        retire_old: function() {
+            if (ops.retire_old() !== true || !phase('retired')) return false;
+            return type(ops.finalize_new) != 'function' || ops.finalize_new() === true;
+        }
     };
     let result = execute(wrapped);
     if (result.ok && !result.cleanup_required) {
@@ -95,6 +99,8 @@ function recover(ops, journal_dir, generation_dir, source) {
     try {
         if (plan.action == 'restore') {
             let current = gen.current_id(generation_dir, source);
+            if (record.phase != 'prepared' && !journal.mark_rollback(journal_dir, source, record.old_generation, record.new_generation))
+                return { ok:false, error:'Cannot record rollback phase' };
             if (current == record.new_generation && !gen.switch_to(generation_dir, source, current, record.old_generation))
                 return { ok:false, error:'Cannot restore old generation' };
             if (ops.restore_old() !== true || ops.verify_old() !== true || ops.discard_new() !== true)
@@ -107,6 +113,8 @@ function recover(ops, journal_dir, generation_dir, source) {
             return { ok:false, error:'Cannot safely finish new routing' };
         if (record.phase == 'verified' && !journal.write(journal_dir, source, record.old_generation, record.new_generation, 'retired'))
             return { ok:false, error:'Cannot record swap cleanup' };
+        if (type(ops.finalize_new) == 'function' && ops.finalize_new() !== true)
+            return { ok:false, error:'Cannot finalize new routing' };
         if (!journal.clear(journal_dir, source, record.old_generation, record.new_generation, function() { return ops.verify_new() === true; }))
             return { ok:false, error:'Cannot clear finished journal' };
         return { ok:true, action:'finished' };

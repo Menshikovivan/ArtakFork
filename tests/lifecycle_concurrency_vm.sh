@@ -85,6 +85,9 @@ ucode -L "$lib" "$lib/components/updates.uc" subscription-update realtest > "$di
 updater=$!
 for i in $(seq 1 30); do [ -f "$dir/reached" ] && break; sleep 1; done
 test -f "$dir/reached" || fail "updater did not enter hold"
+test -s /var/run/forkop.reload.lock/pid || fail "updater did not hold reload lock during download"
+test -s /var/run/forkop/subscription-update.lock/pid || fail "updater did not hold subscription lock during download"
+test "$(cat /var/run/forkop.reload.lock/pid)" = "$(cat /var/run/forkop/subscription-update.lock/pid)" || fail "update locks have different owners"
 old_pid=$(state sing-box-service-runtime-pid)
 forkop reload on_config_change > "$dir/queued.log" 2>&1 &
 reload=$!

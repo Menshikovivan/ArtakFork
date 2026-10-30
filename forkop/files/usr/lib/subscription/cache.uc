@@ -1889,9 +1889,26 @@ function activate_awg_source(section_name_value, source, url, configured_ua, con
     let identity = awg_subscription_source_identity(source, url, effective_ua, effective_hwid);
     let revision = require('subscription.amnezia_store').revision(FORKOP_AWG_CANDIDATE_DIR, source, identity);
     if (identity == '' || revision == null) return 1;
-    let existing = require('subscription.amnezia_active').peek(active_dir, source, identity);
+    let gen = require('subscription.amnezia_generation');
+    let active_pointer = gen.current_id(generation_dir, source);
+    let active_record = active_pointer == null ? null : gen.read_generation(generation_dir, source, active_pointer);
+    if (fs.stat(generation_dir + '/' + source + '.current') != null && active_record == null) return 1;
+    let existing = active_record != null && active_record.identity == identity ? active_record.revision :
+        require('subscription.amnezia_active').peek(active_dir, source, identity);
     if (existing != null) {
-        if (existing != revision) return 1;
+        if (existing != revision) {
+            let old_id = active_pointer;
+            let old = active_record;
+            let queue_dir = getenv('FORKOP_AWG_SWAP_QUEUE_DIR') || '/etc/forkop/awg-swap-queue';
+            uci_core.reload(CONFIG_NAME);
+            connections.set_item_sections_from_cursor({ foreach: function(pkg, stype, fn) {
+                for (let item in uci_core.section_objects(pkg, stype)) fn(item);
+            } }, CONFIG_NAME);
+            if (old == null || old.identity != identity || old.mode != mode ||
+                !subscription_config_is_current(section_name_value, url, configured_ua, configured_hwid, uci_sections()) ||
+                !require('subscription.amnezia_swap_queue').enqueue(queue_dir, source, identity, revision, old_id, mode, legacy_revision)) return 1;
+            return 5; // Scheduled only after updater releases its locks.
+        }
         uci_core.reload(CONFIG_NAME);
         let parsed = { url: url, user_agent: configured_ua, hwid: configured_hwid };
         let current_status = awg_current_status(source, parsed);
@@ -2074,6 +2091,10 @@ function download_subscription_into_cache(section_name_value, subscription_url, 
                 getenv('FORKOP_AWG_LEGACY_DIR') || '/etc/forkop/awg-legacy-good');
             let activated = legacy_revision == null ? 1 : activate_awg_source(section_name_value, cache_section, subscription_url, subscription_user_agent,
                 subscription_hwid, effective_user_agent, effective_hwid, raw_tmpfile, 'mixed', legacy_revision);
+            if (activated == 5) {
+                unlink_path(raw_tmpfile); unlink_path(headers_tmpfile); unlink_path(normalized_tmpfile); unlink_path(metadata_tmpfile);
+                return 5;
+            }
             if (activated != 0 && activated != 2) {
                 unlink_path(raw_tmpfile); unlink_path(headers_tmpfile); unlink_path(normalized_tmpfile); unlink_path(metadata_tmpfile);
                 log_message('Mixed subscription AWG activation failed; previous cache retained', 'warn');
@@ -2350,7 +2371,7 @@ function subscription_update_section(section, force) {
             append_metadata_file(metadata_tmpfile, metadata_output_path, total, source_section);
             changed++;
         }
-        else if (update_result == 2) {
+        else if (update_result == 2 || update_result == 5) {
             append_metadata_file(metadata_tmpfile, metadata_output_path, total, source_section);
             unchanged++;
         }
@@ -2495,6 +2516,9 @@ function subscription_update_selected_source(sections, section_name_value, sourc
     else if (update_result == 4) {
         log_message("Subscription source '" + source_index + "' update for rule '" + section_name_value + "' was superseded by newer URLs", "info");
     }
+    else if (update_result == 5) {
+        log_message("AWG source update queued for a guarded runtime transition", "info");
+    }
     else {
         log_message("Failed to download subscription source '" + source_index + "' for rule '" + section_name_value + "'", "info");
     }
@@ -2516,7 +2540,7 @@ function add_subscription_update_result(summary, result) {
         summary.updated++;
     else if (result == 1)
         summary.failed++;
-    else if (result == 2)
+    else if (result == 2 || result == 5)
         summary.unchanged++;
     else if (result == 4)
         summary.superseded++;

@@ -36,6 +36,18 @@ function parse_rule(rule) {
         !exists(rule.expr[2], 'counter') || !exists(rule.expr[3], 'drop') || type(b.right) != 'string') return null;
     return { mark:int(a.right), name:b.right };
 }
+function rules_match(rules, guards) {
+    if (length(rules) < length(guards)) return false;
+    let seen = {};
+    for (let i = 0; i < length(guards); i++) {
+        let parsed = parse_rule(rules[i]), matched = false;
+        if (parsed == null) return false;
+        for (let g in guards)
+            if (g.name == parsed.name && g.mark == parsed.mark && !seen[g.name]) { seen[g.name] = true; matched = true; }
+        if (!matched) return false;
+    }
+    return true;
+}
 function verify(journal_dir, generation_dir, source, old_dir, new_dir, opts) {
     opts = type(opts) == 'object' ? opts : {};
     let read_journal = opts.read_journal || journal.read, read_snapshot = opts.load || snapshot.load;
@@ -44,12 +56,12 @@ function verify(journal_dir, generation_dir, source, old_dir, new_dir, opts) {
     if (type(table) != 'string' || !match(table, /^[A-Za-z0-9_]{1,64}$/)) return {ok:false,error:'Invalid guard table'};
     try {
         let j = read_journal(journal_dir, source);
-        if (type(j) != 'object' || j.source != source || index(['union','published','verified'], j.phase) < 0 ||
+        if (type(j) != 'object' || j.source != source || index(['union','published','verified','rollback','retired'], j.phase) < 0 ||
             type(j.old_snapshot) != 'string' || !match(j.old_snapshot, /^[0-9a-f]{64}$/) ||
             type(j.new_snapshot) != 'string' || !match(j.new_snapshot, /^[0-9a-f]{64}$/))
             return {ok:false,error:'Invalid swap journal'};
         let pointer = current_id(generation_dir, source);
-        if (pointer != (j.phase == 'union' ? j.old_generation : j.new_generation))
+        if (pointer != (j.phase == 'union' || j.phase == 'rollback' ? j.old_generation : j.new_generation))
             return {ok:false,error:'Generation pointer differs from journal'};
         let old = read_snapshot(old_dir), next = read_snapshot(new_dir);
         if (old?.revision != j.old_snapshot || next?.revision != j.new_snapshot ||
@@ -66,21 +78,36 @@ function verify(journal_dir, generation_dir, source, old_dir, new_dir, opts) {
             if (item.chain?.name == 'mangle_output' && item.chain.table == table && item.chain.family == 'inet') chain = item.chain;
             if (item.rule?.chain == 'mangle_output' && item.rule.table == table && item.rule.family == 'inet') push(rules, item.rule);
         }
-        if (chain?.type != 'route' || chain?.hook != 'output' || chain?.prio != -150 || chain?.policy != 'accept' || length(rules) < length(plan.guards))
+        if (chain?.type != 'route' || chain?.hook != 'output' || chain?.prio != -150 || chain?.policy != 'accept')
             return {ok:false,error:'Guard chain differs'};
-        let seen = {};
-        for (let i = 0; i < length(plan.guards); i++) {
-            let parsed = parse_rule(rules[i]), matched = false;
-            if (parsed == null) return {ok:false,error:'Guard rule missing or reordered'};
-            for (let g in plan.guards)
-                if (g.name == parsed.name && g.mark == parsed.mark && !seen[g.name]) { seen[g.name] = true; matched = true; }
-            if (!matched) return {ok:false,error:'Guard rule differs'};
+        let actual = plan.guards;
+        if (!rules_match(rules, actual)) {
+            if (j.phase != 'retired') return {ok:false,error:'Guard rule differs'};
+            let global_dir = opts.global_snapshot_dir || getenv('FORKOP_AWG_SNAPSHOT_DIR') || '/etc/forkop/awg-snapshot';
+            let global = read_snapshot(global_dir);
+            let single = union.plan([], next.entries, []);
+            if (global?.revision != j.new_snapshot || !single.ok || !rules_match(rules, single.guards))
+                return {ok:false,error:'Retired guard differs'};
+            // No old-only union guard may follow the new-only prefix.
+            for (let i = length(single.guards); i < length(rules); i++) {
+                let extra = parse_rule(rules[i]);
+                if (extra == null) continue;
+                for (let old_guard in plan.guards) {
+                    let in_new = false;
+                    for (let new_guard in single.guards) if (new_guard.name == old_guard.name && new_guard.mark == old_guard.mark) in_new = true;
+                    if (!in_new && extra.name == old_guard.name && extra.mark == old_guard.mark)
+                        return {ok:false,error:'Retired guard has stale rules'};
+                }
+            }
+            let after_global = read_snapshot(global_dir);
+            if (after_global?.revision != j.new_snapshot) return {ok:false,error:'Global snapshot changed'};
+            actual = single.guards;
         }
         let old_after = read_snapshot(old_dir), next_after = read_snapshot(new_dir);
         if (old_after?.revision != j.old_snapshot || next_after?.revision != j.new_snapshot ||
             !same_journal(j, read_journal(journal_dir, source)) || current_id(generation_dir, source) != pointer)
             return {ok:false,error:'Swap state changed during verification'};
-        return {ok:true, guards:plan.guards};
+        return {ok:true, guards:actual};
     } catch (e) { return {ok:false,error:'Cannot verify union guard'}; }
 }
 return { verify };

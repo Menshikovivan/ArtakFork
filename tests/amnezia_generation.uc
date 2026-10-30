@@ -112,6 +112,16 @@ locks.with_awg = function() { push(events, 'awg+'); die('sensitive exception fix
 let thrown = orchestrator.execute(function() { return ops; }, jdir4, gen, 'source', first_id, second_id, {locks});
 expect(!thrown.ok && join(',', events) == 'reload+,subscription+,awg+,subscription-,reload-' &&
     index(sprintf('%J', thrown), 'sensitive exception fixture') < 0, 'exception handling or lock cleanup');
+let jdir6 = base + '/journal6';
+expect(fs.mkdir(jdir6), 'finalizer journal fixture');
+ops.snapshot_revisions = function() { return {old:first_id, new:second_id}; };
+ops.finalize_new = function() { return false; };
+let pending_finalizer = swap.execute_journaled(ops, jdir6, gen, 'source', first_id, second_id);
+expect(pending_finalizer.ok && pending_finalizer.cleanup_required && journal.read(jdir6, 'source').phase == 'retired',
+    'failed finalizer did not retain retired journal');
+ops.finalize_new = function() { return true; };
+expect(swap.recover(ops, jdir6, gen, 'source').ok && journal.read(jdir6, 'source') == null,
+    'retired finalizer recovery failed');
 let jdir5 = base + '/journal5';
 expect(fs.mkdir(jdir5) && journal.write(jdir5, 'source', first_id, second_id, 'prepared'), 'permissions journal fixture');
 print('AWG atomic generation and crash journal checks passed\n');

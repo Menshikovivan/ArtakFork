@@ -4488,30 +4488,74 @@ function subscription_update_common_locked(force, target_section, target_source_
     return true;
 }
 
+const AWG_SWAP_DISPATCH_ENABLED = false;
+// Called only after releasing reload and subscription locks: each job takes
+// the same locks itself and retains its request on failure for later retry.
+function run_pending_awg_swap_jobs() {
+    if (!require('subscription.amnezia_feature').enabled()) return true;
+    let dir = getenv('FORKOP_AWG_SWAP_QUEUE_DIR') || '/etc/forkop/awg-swap-queue';
+    let stat = fs.lstat(dir);
+    if (stat == null) return true;
+    if (stat.type != 'directory') return false;
+    let files = fs.lsdir(dir);
+    if (type(files) != 'array') return false;
+    // Enable only after startup recovery of partially retired interfaces is
+    // proven on OpenWrt; retain requests and the current generation meanwhile.
+    if (!AWG_SWAP_DISPATCH_ENABLED) {
+        for (let file in files) if (match(file, /\.request\.json$/)) {
+            log_message('AWG update is queued; automatic swap is disabled until recovery is verified', 'warn');
+            return false;
+        }
+        return true;
+    }
+    let ok = true;
+    for (let file in sort(files)) {
+        if (!match(file, /\.request\.json$/)) continue;
+        let found = match(file, /^([A-Za-z0-9_-]{1,100})\.request\.json$/);
+        if (found == null || module_status([ LIB_DIR + '/service/lifecycle.uc', 'awg-swap-job', found[1] ]) != 0) {
+            ok = false;
+            log_message('AWG update remains pending; previous working generation was retained or recovery is required', 'warn');
+        }
+    }
+    return ok;
+}
+function pending_awg_swap_requests() {
+    if (!require('subscription.amnezia_feature').enabled()) return false;
+    let dir = getenv('FORKOP_AWG_SWAP_QUEUE_DIR') || '/etc/forkop/awg-swap-queue';
+    let st = fs.lstat(dir);
+    if (st == null) return false;
+    let entries = st.type == 'directory' ? fs.lsdir(dir) : null;
+    if (type(entries) != 'array') return true;
+    for (let name in entries) if (match(name, /\.request\.json$/)) return true;
+    return false;
+}
+
 function subscription_update_common(force, target_section, target_source_index) {
     if (!subscription_cache_success([ "ensure-runtime-dirs" ]))
         exit(1);
 
     force = !!force;
-    if (!acquire_runtime_lock(SUBSCRIPTION_UPDATE_LOCK_DIR, force)) {
-        log_message("Subscription update is already running", "info");
-        if (force)
-            mark_pending_reload("subscription_update_busy");
-        return force ? 1 : 0;
-    }
-
     if (!acquire_runtime_lock(RELOAD_LOCK_DIR, force)) {
-        release_runtime_lock(SUBSCRIPTION_UPDATE_LOCK_DIR);
         log_message("Forkop reload is already running; skipping subscription update", "info");
         if (force)
             mark_pending_reload("reload_busy");
         return force ? 1 : 0;
     }
 
+    // Match manual restart and AWG transitions: reload -> subscription -> AWG.
+    if (!acquire_runtime_lock(SUBSCRIPTION_UPDATE_LOCK_DIR, force)) {
+        release_runtime_lock(RELOAD_LOCK_DIR);
+        log_message("Subscription update is already running", "info");
+        if (force)
+            mark_pending_reload("subscription_update_busy");
+        return force ? 1 : 0;
+    }
+
     let ok = subscription_update_common_locked(force, target_section, target_source_index);
-    subscription_record_result(ok, target_section);
-    release_runtime_lock(RELOAD_LOCK_DIR);
     release_runtime_lock(SUBSCRIPTION_UPDATE_LOCK_DIR);
+    release_runtime_lock(RELOAD_LOCK_DIR);
+    if (!run_pending_awg_swap_jobs()) ok = false;
+    subscription_record_result(ok, target_section);
     run_pending_reload_if_requested();
     if (ok && subscription_outbounds_changed)
         module_background([ DIAGNOSTICS_UC, "automatic-latency-test", "new" ]);
@@ -4525,23 +4569,29 @@ function subscription_prepare_only(target_section, target_source_index) {
     if (!subscription_cache_success([ "ensure-runtime-dirs" ]))
         exit(1);
 
-    if (!acquire_runtime_lock(SUBSCRIPTION_UPDATE_LOCK_DIR, true)) {
-        log_message("Subscription update is already running; manual restart preparation was not started", "warn");
-        exit(1);
-    }
     let owns_reload_lock = as_string(getenv("FORKOP_MANUAL_RESTART_LOCK_HELD") || "0") != "1";
     if (owns_reload_lock && !acquire_runtime_lock(RELOAD_LOCK_DIR, true)) {
-        release_runtime_lock(SUBSCRIPTION_UPDATE_LOCK_DIR);
         log_message("Forkop reload is already running; manual restart preparation was not started", "warn");
+        exit(1);
+    }
+    if (!acquire_runtime_lock(SUBSCRIPTION_UPDATE_LOCK_DIR, true)) {
+        if (owns_reload_lock) release_runtime_lock(RELOAD_LOCK_DIR);
+        log_message("Subscription update is already running; manual restart preparation was not started", "warn");
         exit(1);
     }
 
     let prepared = subscription_prepare_cache_request(true, target_section, target_source_index);
+    release_runtime_lock(SUBSCRIPTION_UPDATE_LOCK_DIR);
     if (owns_reload_lock)
         release_runtime_lock(RELOAD_LOCK_DIR);
-    release_runtime_lock(SUBSCRIPTION_UPDATE_LOCK_DIR);
     if (!prepared.ok)
         exit(1);
+    if (pending_awg_swap_requests()) {
+        if (!owns_reload_lock || !run_pending_awg_swap_jobs()) {
+            log_message('AWG update is pending; preserving the current runtime before manual restart', 'warn');
+            exit(1);
+        }
+    }
 
     log_message(prepared.updated > 0 ?
         "Subscription data was prepared for manual restart" :

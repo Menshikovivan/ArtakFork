@@ -28,8 +28,9 @@ function create(ctx, hooks) {
         let begun = false, committed = false;
         function run() {
           try {
-            if (!stable('prepared') || hooks.begin() !== true) return false;
+            if (!stable('prepared')) return false;
             begun = true;
+            if (hooks.begin() !== true) return false;
             // Rebuild the complete base table and all list-backed sets. An
             // incomplete candidate must never replace the live dataplane.
             if (hooks.rebuild_base() !== true || hooks.install_guards(ctx) !== true ||
