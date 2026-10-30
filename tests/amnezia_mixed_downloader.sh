@@ -3,7 +3,8 @@
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 WORK=$(mktemp -d)
-trap 'rm -rf "$WORK"' EXIT
+cleanup() { status=$?; if [ "$status" -ne 0 ]; then echo "fixture failed after: ${stage:-setup}" >&2; cat "$WORK/logger.log" 2>/dev/null || :; fi; rm -rf "$WORK"; }
+trap cleanup EXIT
 cp -R "$ROOT/forkop/files/usr/lib" "$WORK/lib"
 # Inject one filesystem fault in the private test copy only, precisely at the
 # legacy JSON rename. All normal downloader and generation code stays real.
@@ -24,6 +25,7 @@ export FORKOP_AWG_CANDIDATE_DIR="$WORK/candidate" FORKOP_AWG_ACTIVE_DIR="$WORK/a
 export FORKOP_AWG_LAST_GOOD_DIR="$WORK/good" FORKOP_AWG_STATUS_DIR="$WORK/status"
 export FORKOP_AWG_GENERATION_DIR="$WORK/generation" FORKOP_AWG_LEGACY_DIR="$WORK/legacy"
 export TEST_FEED="$WORK/feed" PATH="$WORK/bin:$PATH"
+export TEST_LOG="$WORK/logger.log"
 cat > "$WORK/lib/subscription/amnezia_feature.uc" <<'UC'
 return {enabled:function() { return true; }};
 UC
@@ -68,7 +70,7 @@ fi
 SH
 cat > "$WORK/bin/logger" <<'SH'
 #!/bin/sh
-exit 0
+printf '%s\n' "$*" >> "$TEST_LOG"
 SH
 cat > "$WORK/bin/sing-box" <<'SH'
 #!/bin/sh
@@ -89,12 +91,14 @@ printf '[Interface]\nPrivateKey = %s\nAddress = 10.0.0.2/32\n[Peer]\nPublicKey =
  printf 'vpn://'; base64 < "$WORK/profile" | tr -d '\n'; printf '\n'
 } > "$TEST_FEED"
 run_update() { ucode -L "$FORKOP_LIB" "$FORKOP_LIB/subscription/cache.uc" update-source test 1 https://example.invalid/sub runtime; }
+stage=initial
 run_update
 test -s "$WORK/generation/test-subscription-1.current"
 test -s "$WORK/singbox/subscriptions/test-subscription-1.json"
 cp "$WORK/generation/test-subscription-1.current" "$WORK/pointer-before"
 cp "$WORK/singbox/subscriptions/test-subscription-1.json" "$WORK/legacy-before"
 printf 'vpn://invalid\n' >> "$TEST_FEED"
+stage=invalid
 if run_update; then echo 'invalid AWG accepted' >&2; exit 1; fi
 cmp "$WORK/pointer-before" "$WORK/generation/test-subscription-1.current"
 cmp "$WORK/legacy-before" "$WORK/singbox/subscriptions/test-subscription-1.json"
@@ -102,6 +106,7 @@ cmp "$WORK/legacy-before" "$WORK/singbox/subscriptions/test-subscription-1.json"
 # A source edited during the HTTP request cannot replace old generation or
 # legacy bytes. Restore the valid feed; the fake curl changes the UCI state.
 sed -i '$d' "$TEST_FEED"
+stage=source-change
 if TEST_CHANGE_SOURCE=1 run_update; then echo 'changed source was accepted' >&2; exit 1; fi
 cmp "$WORK/pointer-before" "$WORK/generation/test-subscription-1.current"
 cmp "$WORK/legacy-before" "$WORK/singbox/subscriptions/test-subscription-1.json"
@@ -115,6 +120,7 @@ forkop.other.enabled=1
 forkop.other.action=connection
 forkop.other.subscription_urls=https://example.invalid/sub
 STATE
+stage=legacy-rename
 if TEST_FAIL_RENAME=1 ucode -L "$FORKOP_LIB" "$FORKOP_LIB/subscription/cache.uc" update-source other 1 https://example.invalid/sub runtime; then
  echo 'failed legacy rename was accepted' >&2; exit 1
 fi
