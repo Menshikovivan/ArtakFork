@@ -63,7 +63,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           python3 -m unittest discover -s scripts/tests -p test_awg_bootstrap.py -v
+          python3 -m unittest discover -s scripts/tests -p test_awg_sources.py -v
           python3 scripts/prepare_awg_bootstrap.py filtered-bin/artak-release
+          python3 scripts/prepare_awg_sources.py filtered-bin/artak-release
 
       - name: Prepare installer and package checksums
         shell: bash
@@ -85,7 +87,7 @@ jobs:
           test "${#bootstrap[@]}" -eq 4
           awg=(amneziawg-tools_*.apk kmod-amneziawg_*.apk luci-proto-amneziawg_*.apk)
           test "${#awg[@]}" -eq 3
-          sources=(upstream-forkop-source.tar.gz sing-box-extended-source.tar.gz amneziawg-openwrt-source.tar.gz)
+          sources=(upstream-forkop-source.tar.gz sing-box-extended-source.tar.gz amneziawg-openwrt-source.tar.gz amneziawg-tools-source.tar.gz amneziawg-kmod-source.tar.gz)
           for file in "${bootstrap[@]}" "${awg[@]}" "${sources[@]}"; do test -s "$file"; done
           sha256sum "${packages[@]}" "${bootstrap[@]}" "${awg[@]}" "${sources[@]}" install-awg-dependencies.sh > SHA256SUMS
           sha256sum -c SHA256SUMS
@@ -101,6 +103,7 @@ jobs:
             filtered-bin/artak-release/install-awg-dependencies.sh
             filtered-bin/artak-release/bootstrap-sources.json
             filtered-bin/artak-release/amneziawg-sources.json
+            filtered-bin/artak-release/amneziawg-upstream-sources.json
             filtered-bin/artak-release/*-source.tar.gz
           retention-days: 30
           if-no-files-found: error
@@ -139,7 +142,7 @@ jobs:
 
           Packages are distributed directly through this GitHub release, without a custom mirror. APK files are unsigned; the installer explicitly uses apk --allow-untrusted for these downloaded local packages. No APK signing key is supplied.
           EOF
-          assets=(*.apk *.ipk *-source.tar.gz SHA256SUMS artak-install.sh install-awg-dependencies.sh bootstrap-sources.json amneziawg-sources.json)
+          assets=(*.apk *.ipk *-source.tar.gz SHA256SUMS artak-install.sh install-awg-dependencies.sh bootstrap-sources.json amneziawg-sources.json amneziawg-upstream-sources.json)
           gh release create "$VERSION" "${assets[@]}" \
             --target "$RELEASE_COMMIT" \
             --prerelease \

@@ -95,4 +95,6 @@ jobs:
           export ARTAK_TEST_UCODE_MODULES="$RUNNER_TEMP/ucode-build"
           # ubusd rejects publishing and accessing objects for non-root clients
           # without explicit system ACLs; OpenWrt's rpcd runs as root.
-          sudo --preserve-env=LD_LIBRARY_PATH,ARTAK_TEST_PREFIX,ARTAK_TEST_UCODE,ARTAK_TEST_UCODE_MODULES bash tests/amnezia_real_rpcd.sh
+          sudo env LD_LIBRARY_PATH="$LD_LIBRARY_PATH" ARTAK_TEST_PREFIX="$ARTAK_TEST_PREFIX" \
+            ARTAK_TEST_UCODE="$ARTAK_TEST_UCODE" ARTAK_TEST_UCODE_MODULES="$ARTAK_TEST_UCODE_MODULES" \
+            bash tests/amnezia_real_rpcd.sh

@@ -1859,14 +1859,14 @@ function stage_awg_subscription_candidate(raw_path, source, url, user_agent, hwi
     return 0;
 }
 
-// First activation of a single-profile AWG-only feed. Replacements and batches
-// are deliberately refused until they have transactional interface swapping.
+// First activation of an AWG-only feed. Replacements are refused until they
+// have transactional interface swapping coordinated with the firewall.
 function activate_awg_only(section_name_value, source, url, configured_ua, configured_hwid, effective_ua, effective_hwid, raw_path) {
     let awg = require('subscription.amnezia_subscription');
     let raw = fs.readfile(raw_path);
     if (!awg.only_awg(raw)) return 1;
     let validation = awg.validated(raw);
-    if (!validation.ok || length(validation.profiles) != 1) return 1;
+    if (!validation.ok || !length(validation.profiles) || length(validation.profiles) > 32) return 1;
     let active_dir = getenv('FORKOP_AWG_ACTIVE_DIR') || '/etc/forkop/awg-active';
     let good_dir = getenv('FORKOP_AWG_LAST_GOOD_DIR') || '/etc/forkop/awg-last-good';
     let status_dir = getenv('FORKOP_AWG_STATUS_DIR') || '/etc/forkop/awg-subscription-status';
@@ -1886,9 +1886,9 @@ function activate_awg_only(section_name_value, source, url, configured_ua, confi
         return subscription_config_is_current(section_name_value, url, configured_ua, configured_hwid, uci_sections());
     }
     if (!current()) return 4;
-    let result = require('subscription.amnezia_candidate_apply').allocate_and_activate(
-        FORKOP_AWG_CANDIDATE_DIR, active_dir, source, identity, 0, 15000,
-        { last_good_dir: good_dir, publish: function(rev) {
+    let result = require('subscription.amnezia_batch').activate(
+        FORKOP_AWG_CANDIDATE_DIR, active_dir, good_dir, source, identity, 15000,
+        { publish: function(rev) {
             if (!current()) return false;
             if (!require('subscription.amnezia_status').save(status_dir, active_dir, good_dir, source, url, effective_ua, effective_hwid, identity, rev)) return false;
             return current();
