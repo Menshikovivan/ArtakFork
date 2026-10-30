@@ -102,7 +102,19 @@ run_profile() {
     ip -n awg-peer link set atb up
     ip -n awg-peer route add 10.88.0.1/32 dev atb
     ip route add 10.88.0.2/32 dev ata
-    ip netns exec awg-peer ping -q -c 5 -w 12 10.88.0.1 >/dev/null
+    if ! ip netns exec awg-peer ping -c 5 -w 12 10.88.0.1; then
+        echo "VM $profile tunnel ping failed; diagnostic status follows" >&2
+        ip -n awg-peer addr show atb || true
+        ip -n awg-peer route show || true
+        ip route get 10.88.0.2 || true
+        echo 'Host handshake timestamps:'
+        awg show ata latest-handshakes | awk '{print $2}' || true
+        echo 'Peer handshake timestamps:'
+        ip netns exec awg-peer awg show atb latest-handshakes | awk '{print $2}' || true
+        logread | grep -E 'netifd|amneziawg' | tail -30 | sed -E 's/[A-Za-z0-9+\/]{42,43}=/[REDACTED]/g' || true
+        exit 1
+    fi
+    echo "VM stage: $profile ping passed, checking handshakes"
     ip netns exec awg-peer awg show atb latest-handshakes | awk 'NR==1 && $2>0 {ok=1} END {exit !ok}'
     awg show ata latest-handshakes | awk 'NR==1 && $2>0 {ok=1} END {exit !ok}'
     echo "OpenWrt kmod/netifd $profile handshake and ping passed"
