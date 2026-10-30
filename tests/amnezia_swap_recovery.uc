@@ -12,6 +12,9 @@ let opts = {
 expect(recovery.recover_all(dir, dir, opts).ok && calls == 0, 'empty directory');
 expect(recovery.recover_all(dir + '/absent', dir, {holds_locks:function() { return true; }}).ok, 'missing directory is empty');
 expect(recovery.recover_all(dir, dir, {holds_locks:function() { return true; }}).ok, 'empty directory needs no provider');
+fs.writefile(dir + '/first.prepare.json', '{}');
+expect(!recovery.recover_all(dir, dir, opts).ok && fs.stat(dir + '/first.prepare.json') != null, 'prepared resources need inspection');
+fs.unlink(dir + '/first.prepare.json');
 fs.writefile(dir + '/first.swap.json', '{}');
 expect(!recovery.recover_all(dir, dir, {holds_locks:function() { return true; }}).ok, 'journal without provider fails closed');
 held = false;

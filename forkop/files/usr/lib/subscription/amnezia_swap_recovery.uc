@@ -33,6 +33,10 @@ function recover_all(journal_dir, generation_dir, opts) {
         if (type(entries) != 'array') return {ok:false,error:'Cannot inspect swap journals'};
         let sources = [];
         for (let filename in sort(entries)) {
+            // An interrupted pre-apply journal can own partially created UCI
+            // sections. Never remove it until cleanup has been implemented.
+            if (match(filename, /\.prepare\.json$/))
+                return {ok:false,error:'Prepared AWG resources require inspection'};
             if (!match(filename, /\.swap\.json$/)) continue;
             let matched = match(filename, /^([A-Za-z0-9_-]{1,100})\.swap\.json$/);
             if (matched == null) return {ok:false,error:'Invalid swap journal filename'};
@@ -53,7 +57,7 @@ function recover_all(journal_dir, generation_dir, opts) {
         let remaining = fs.lsdir(journal_dir);
         if (type(remaining) != 'array') return {ok:false,error:'Cannot inspect swap journals'};
         for (let filename in remaining)
-            if (match(filename, /\.swap\.json$/)) return {ok:false,error:'Swap journal appeared during recovery'};
+            if (match(filename, /\.(swap|prepare)\.json$/)) return {ok:false,error:'AWG journal appeared during recovery'};
         return {ok:true,recovered:length(sources)};
     } catch (e) { return {ok:false,error:'Swap recovery failed'}; }
 }

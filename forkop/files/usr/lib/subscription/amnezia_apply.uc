@@ -11,6 +11,13 @@ let handshake = require('subscription.amnezia_handshake');
 let conf = require('subscription.amnezia_conf');
 let verifier = require('subscription.amnezia_verify');
 let active_lease = null;
+function valid_lease(lease) {
+    if (lease == null || lease !== active_lease) return false;
+    let current = fs.lstat(lease.lock_dir);
+    return type(current) == 'object' && current.type == 'directory' &&
+        current.uid == lease.uid && current.inode == lease.inode &&
+        current.dev?.major == lease.major && current.dev?.minor == lease.minor && (current.mode & 63) == 0;
+}
 
 function normalized(section) {
     if (type(section) != 'object') return null;
@@ -27,7 +34,7 @@ function apply_internal(text, name, table, priority, timeout_ms, opts, lease) {
     // Alternate directories exist only for isolated tests. A caller must never
     // pass paths derived from subscription content or unauthenticated input.
     let borrowed = lease != null;
-    if (borrowed && (lease !== active_lease || lease.lock_dir != lock_dir)) return {ok:false,error:'Expired lock session'};
+    if (borrowed && (!valid_lease(lease) || lease.lock_dir != lock_dir)) return {ok:false,error:'Expired lock session'};
     if (!borrowed && !fs.mkdir(lock_dir)) return { ok: false, error: 'Another import is running or a stale lock exists' };
     let created_delta = false, cursor = null, names = [], snapshots = {}, committed = false;
     function process() {
@@ -113,7 +120,7 @@ function cleanup_internal(text, name, table, priority, opts, lease) {
     let plan = routes.prepare(name, table, priority, ipv4, ipv6);
     if (!plan.ok) return { ok:false, error:'Invalid cleanup allocation' };
     let borrowed = lease != null;
-    if (borrowed && (lease !== active_lease || lease.lock_dir != lock_dir)) return {ok:false,error:'Expired lock session'};
+    if (borrowed && (!valid_lease(lease) || lease.lock_dir != lock_dir)) return {ok:false,error:'Expired lock session'};
     if (!borrowed && !fs.mkdir(lock_dir)) return { ok:false, error:'Another import is running or a stale lock exists' };
     let created_delta = false;
     function process() {
@@ -160,17 +167,24 @@ function with_lock(opts, callback) {
     let lock_dir = opts.lock_dir || '/tmp/artak-awg-apply.lock';
     if (!fs.mkdir(lock_dir)) return {ok:false,error:'Another import is running or a stale lock exists'};
     if (!fs.chmod(lock_dir, 448)) { fs.rmdir(lock_dir); return {ok:false,error:'Could not secure lock directory'}; }
-    let lease = {lock_dir};
+    let st = fs.lstat(lock_dir);
+    if (st == null || st.type != 'directory' || type(st.dev) != 'object' || (st.mode & 63) != 0) {
+        fs.rmdir(lock_dir); return {ok:false,error:'Could not inspect lock directory'};
+    }
+    let lease = {lock_dir, uid:st.uid, inode:st.inode, major:st.dev.major, minor:st.dev.minor};
     active_lease = lease;
     let result;
     try {
         result = callback({
+            valid: function() { return valid_lease(lease); },
             apply: function(text, name, table, priority, timeout_ms) { return apply_internal(text, name, table, priority, timeout_ms, opts, lease); },
             cleanup: function(text, name, table, priority) { return cleanup_internal(text, name, table, priority, opts, lease); }
         });
     } catch (e) { result = {ok:false,error:'Locked operation failed'}; }
+    let owned = valid_lease(lease);
     active_lease = null;
-    fs.rmdir(lock_dir);
+    if (owned) fs.rmdir(lock_dir);
+    else result = {ok:false,error:'AWG lock ownership changed; inspect runtime'};
     return result;
 }
 return { apply, cleanup, with_lock };

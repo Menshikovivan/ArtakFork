@@ -13,4 +13,12 @@ r = allocate.choose(cursor, { runner: function() { return {ok:false}; }, check }
 expect(!r.ok, 'fails closed when kernel cannot be inspected');
 r = allocate.choose(cursor, { runner, check: function() { return {ok:false,error:'unexpected failure'}; } });
 expect(!r.ok, 'does not treat inspection failure as available');
+let many = allocate.choose_many(cursor, 3, {runner, check});
+expect(many.ok && length(many.allocations) == 3 && many.allocations[0].name == 'afawg_5' &&
+    many.allocations[1].name == 'afawg_6' && many.allocations[2].name == 'afawg_7', 'distinct batch allocations');
+expect(!allocate.choose_many(cursor, 0, {runner, check}).ok && !allocate.choose_many(cursor, 33, {runner, check}).ok, 'invalid batch size');
+expect(!allocate.choose_many(cursor, 32, {runner, check}).ok, 'partial allocations are not returned');
+expect(!allocate.choose_many(cursor, 2, {runner, check:function(table) {
+    return table == '15005' ? {ok:true} : {ok:false,error:'inspection failed'};
+}}).ok, 'inspection error after partial success fails closed');
 print('AmneziaWG allocation checks passed\n');

@@ -81,6 +81,9 @@ def main():
         if 'AWG_VM_ALL_TESTS_PASSED' not in vm.before:
             raise RuntimeError('Guest completed without success marker')
         print('OpenWrt VM: both netifd/kernel AWG profiles passed')
+        # The guest provisioning deliberately stopped fw4 while using LAN as
+        # an uplink; load it before the subsequent real reload test.
+        command(vm, '/etc/init.d/firewall start', timeout=120)
         command(vm, 'ARTAK_DISPOSABLE_VM=1 sh /tmp/artak-fw4.sh', timeout=120)
         print('OpenWrt VM: stock firewall reload retained the independent test guard')
     except Exception:

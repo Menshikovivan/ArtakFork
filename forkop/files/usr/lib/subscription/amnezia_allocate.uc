@@ -4,8 +4,10 @@
 // detect conflicts caused by unrelated policy-rule mark masks.
 let runtime = require('subscription.amnezia_runtime_check');
 let activation = require('subscription.amnezia_activate');
-function choose(cursor, opts) {
+function choose_many(cursor, count, opts) {
     opts = type(opts) == 'object' ? opts : {};
+    if (type(count) != 'int' || count < 1 || count > 32)
+        return { ok: false, error: 'Invalid allocation count' };
     if ((type(cursor) != 'object' && type(cursor) != 'resource'))
         return { ok: false, error: 'Cannot inspect UCI network' };
     let runner = type(opts.runner) == 'function' ? opts.runner : activation.run;
@@ -29,6 +31,7 @@ function choose(cursor, opts) {
                 if ((section_type == 'rule' || section_type == 'rule6') && section.priority != null)
                     priorities['' + section.priority] = true;
             });
+        let allocations = [];
         for (let i = 1; i <= 32; i++) {
             let name = sprintf('afawg_%d', i), table = sprintf('%d', 15000 + i), priority = sprintf('%d', 16000 + 2 * i);
             if (used_names[name] || tables[table] || priorities[priority] || priorities['' + (+priority + 1)]) continue;
@@ -38,11 +41,21 @@ function choose(cursor, opts) {
             if (occupied) continue;
             let current = check(table, priority, runner);
             if (type(current) != 'object') return { ok: false, error: 'Cannot inspect kernel routing' };
-            if (current.ok === true) return { ok: true, name, table, priority };
+            if (current.ok === true) {
+                push(allocations, { name, table, priority });
+                if (length(allocations) == count) return { ok: true, allocations };
+                continue;
+            }
             if (current.error == 'Kernel routing table already used' || current.error == 'Kernel rule priority already used') continue;
             return { ok: false, error: 'Cannot inspect kernel routing' };
         }
-        return { ok: false, error: 'No unused allocation' };
+        return { ok: false, error: 'Not enough unused allocations' };
     } catch (e) { return { ok: false, error: 'Cannot inspect allocation' }; }
 }
-return { choose };
+function choose(cursor, opts) {
+    let result = choose_many(cursor, 1, opts);
+    if (!result.ok) return result;
+    let item = result.allocations[0];
+    return { ok: true, name:item.name, table:item.table, priority:item.priority };
+}
+return { choose, choose_many };

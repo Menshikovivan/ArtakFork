@@ -68,7 +68,8 @@ let events = [];
 let locks = {
     acquire_reload:function() { push(events, 'reload+'); return true; },
     acquire_subscription:function() { push(events, 'subscription+'); return true; },
-    with_awg:function(o, cb) { push(events, 'awg+'); let r = cb({ marker:'lease' }); push(events, 'awg-'); return r; },
+    with_awg:function(o, cb) { push(events, 'awg+'); let r = cb({ marker:'lease', valid:function() { return true; } }); push(events, 'awg-'); return r; },
+    owned:function() { return true; },
     release_subscription:function() { push(events, 'subscription-'); return true; },
     release_reload:function() { push(events, 'reload-'); return true; }
 };

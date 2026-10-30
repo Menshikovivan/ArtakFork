@@ -1,4 +1,5 @@
 let uci = require('uci');
+let fs = require('fs');
 let apply = require('subscription.amnezia_apply');
 function expect(v, m) { if (!v) die(m + '\n'); }
 let dir = getenv('ARTAK_TEST_UCI_DIR');
@@ -61,11 +62,19 @@ mutate_on_stop = false;
 let stale_session = null;
 let batch = apply.with_lock(opts, function(session) {
     stale_session = session;
+    expect(session.valid(), 'Active lease is not valid');
     expect(!apply.with_lock(opts, function() { return {ok:true}; }).ok, 'Nested lock allowed');
     expect(!apply.apply(fixture, 'afawg_other', '16904', '1104', 1000, opts).ok, 'Direct apply bypassed held lock');
     expect(session.apply(fixture, 'afawg_lease', '16903', '1106', 1000).ok, 'Session apply failed');
     expect(session.cleanup(fixture, 'afawg_lease', '16903', '1106').ok, 'Session cleanup failed');
     return {ok:true};
 });
-expect(batch.ok && !stale_session.apply(fixture, 'afawg_lease', '16903', '1106', 1000).ok, 'Expired session remained valid');
+expect(batch.ok && !stale_session.valid() && !stale_session.apply(fixture, 'afawg_lease', '16903', '1106', 1000).ok, 'Expired session remained valid');
+let replaced = apply.with_lock(opts, function(session) {
+    expect(session.valid() && fs.rename(opts.lock_dir, dir + '/old-lock') && fs.mkdir(opts.lock_dir, 0700), 'replace test lock');
+    expect(!session.valid() && !session.apply(fixture, 'afawg_fake', '16905', '1108', 1000).ok, 'replaced lock accepted');
+    return {ok:true};
+});
+expect(!replaced.ok && fs.stat(opts.lock_dir) != null, 'replacement directory was removed');
+fs.rmdir(opts.lock_dir); fs.rmdir(dir + '/old-lock');
 print('AWG apply test passed with real isolated UCI and mock netifd\n');

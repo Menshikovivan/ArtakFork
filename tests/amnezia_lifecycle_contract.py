@@ -8,7 +8,7 @@ from pathlib import Path
 root = Path(__file__).resolve().parents[1]
 text = (root / 'forkop/files/usr/lib/service/lifecycle.uc').read_text(encoding='utf-8')
 startup = text[text.index('function start_main()'):text.index('function refresh_rulesets_after_start()')]
-rebuild = text[text.index('function nft_rebuild_runtime()'):text.index('function nft_candidate_begin()')]
+rebuild = text[text.index('function nft_rebuild_runtime('):text.index('function nft_candidate_begin()')]
 assert startup.index('acquire_start_subscription_update_lock()') < startup.index('amnezia-snapshot-build')
 assert startup.index('acquire_awg_network_lock()') < startup.index('amnezia-snapshot-build')
 assert startup.index('amnezia-snapshot-build') < startup.index('nft_candidate_begin()')

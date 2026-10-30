@@ -43,9 +43,13 @@ function execute_journaled(ops, journal_dir, generation_dir, source, old_id, new
     let gen = require('subscription.amnezia_generation');
     if (gen.current_id(generation_dir, source) != old_id ||
         gen.read_generation(generation_dir, source, old_id) == null ||
-        gen.read_generation(generation_dir, source, new_id) == null ||
-        !journal.write(journal_dir, source, old_id, new_id, 'prepared'))
+        gen.read_generation(generation_dir, source, new_id) == null)
         return { ok:false, error:'Cannot start journaled swap' };
+    let existing = journal.read(journal_dir, source);
+    if (existing == null) {
+        if (!journal.write(journal_dir, source, old_id, new_id, 'prepared')) return { ok:false, error:'Cannot start journaled swap' };
+    } else if (existing.phase != 'prepared' || existing.old_generation != old_id || existing.new_generation != new_id ||
+        existing.old_snapshot != null || existing.new_snapshot != null) return { ok:false, error:'Swap journal is not ready' };
     function phase(name) { return journal.write(journal_dir, source, old_id, new_id, name); }
     let wrapped = {
         prepare: function() {

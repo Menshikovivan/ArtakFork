@@ -697,7 +697,7 @@ function release_start_subscription_update_lock() {
     start_subscription_update_lock_held = false;
 }
 
-function nft_rebuild_runtime() {
+function nft_rebuild_runtime(awg_union) {
     let status = module_status(NFT_UC, [
         "nft-rebuild-runtime-from-uci",
         RT_TABLE_NAME,
@@ -728,6 +728,14 @@ function nft_rebuild_runtime() {
         SB_TPROXY_INBOUND6_ADDRESS
     ]);
     if (status != 0) return status;
+    if (type(awg_union) == 'object') {
+        // The in-process swap factory already holds the AWG network lease.
+        // A single-snapshot guard must not be added ahead of the union.
+        if (type(awg_union.holds) != 'function' || awg_union.holds() !== true) return 1;
+        return module_status(NFT_UC, ['nft-add-awg-union-guards', NFT_TABLE_NAME,
+            awg_union.old_snapshot_dir, awg_union.old_snapshot,
+            awg_union.new_snapshot_dir, awg_union.new_snapshot]);
+    }
     let dir = getenv('FORKOP_AWG_SNAPSHOT_DIR') || '/etc/forkop/awg-snapshot';
     // On disable, retain an existing guard: the old sing-box process can still
     // be running while the new nft transaction is prepared. An invalid saved
@@ -793,6 +801,38 @@ function nft_populate_runtime_sets() {
         NFT_IP_PORT6_SET_NAME,
         NFT_LOCALV6_SET_NAME
     ]);
+}
+
+// Internal bridge for journaled AWG swap; caller must already hold reload,
+// subscription and AWG lease locks. No recursive reload is performed.
+function awg_nft_union_factory(ctx, lease, holds) {
+    if (type(ctx) != 'object' || type(lease) != 'object' || type(lease.valid) != 'function' ||
+        type(holds) != 'function') return null;
+    let union_args = {old_snapshot_dir:ctx.old_snapshot_dir, old_snapshot:ctx.old_snapshot,
+        new_snapshot_dir:ctx.new_snapshot_dir, new_snapshot:ctx.new_snapshot, holds};
+    let checker = require('subscription.amnezia_guard_union_verify');
+    return require('subscription.amnezia_nft_swap_factory').create(ctx, {
+        holds_locks:holds,
+        lease_active:function() { return lease.valid() === true; },
+        begin:function() { return nft_candidate_batch_file == '' && nft_candidate_begin(); },
+        rebuild_base:function() { return nft_rebuild_runtime(union_args) == 0; },
+        // nft_rebuild_runtime appended the union while constructing the table.
+        install_guards:function() { return true; },
+        apply_lists:function() {
+            if (module_success(STATE_UC, ['has-list-update-sources']) &&
+                (!module_success(UPDATES_UC, ['runtime-list-cache-active']) ||
+                 module_status(UPDATES_UC, ['apply-list-cache']) != 0)) return false;
+            return nft_populate_runtime_sets() == 0;
+        },
+        validate:function() { return nft_candidate_validate(); },
+        commit:function() { return nft_candidate_finish(true, true); },
+        abort:function() { return nft_candidate_finish(false); },
+        verify_union:function() {
+            let checked = checker.verify(ctx.journal_dir, ctx.generation_dir, ctx.source,
+                ctx.old_snapshot_dir, ctx.new_snapshot_dir, {});
+            return type(checked) == 'object' && checked.ok === true;
+        },
+    });
 }
 
 function singbox_init_config() {

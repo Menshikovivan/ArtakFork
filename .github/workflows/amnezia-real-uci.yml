@@ -98,6 +98,7 @@ jobs:
           bash tests/amnezia_import_real_uci.sh
           bash tests/amnezia_batch.sh
           bash tests/amnezia_manual_source.sh
+          bash tests/amnezia_prepare_journal.sh
           ucode -L "$GITHUB_WORKSPACE/forkop/files/usr/lib/*.uc" tests/amnezia_feature.uc
       - name: Exercise executable plugin with real rpcd and ubus
         shell: bash
