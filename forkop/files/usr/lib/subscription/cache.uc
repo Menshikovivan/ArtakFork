@@ -1108,6 +1108,10 @@ function subscription_import_stats_text(path) {
 
 // Only the update-request process publishes a report. Cache preparation and
 // startup never overwrite the result of an explicit update.
+function safe_section(section) {
+    return type(section) == "string" && match(section, /^[A-Za-z0-9_-]+$/);
+}
+
 let pending_change_report = null;
 function remember_change_report(section, source_index, previous_path, candidate_path, status) {
     if (type(pending_change_report) != "array") return;
@@ -1181,10 +1185,6 @@ function json_length(path) {
 
 function object_has_extra_keys(path) {
     return object_key_count(read_json(path)) > 1;
-}
-
-function safe_section(section) {
-    return type(section) == "string" && match(section, /^[A-Za-z0-9_-]+$/);
 }
 
 function cache_path(cache_dir, section) {
@@ -2757,6 +2757,14 @@ function deferred_subscription_bootstrap_retry_worker(remaining_sections) {
 }
 
 let mode = ARGV[0] || "";
+if (mode == "change-report-fixture") {
+    pending_change_report = [];
+    remember_change_report("test_rule", 1, ARGV[1], ARGV[2], "updated");
+    remember_change_report("test_rule", 2, ARGV[2], ARGV[2], "unchanged");
+    remember_failed_report("bad/rule", 3);
+    publish_change_report();
+    exit(0);
+}
 
 if (mode == "file-first-line") {
     file_first_line(ARGV[1]);
