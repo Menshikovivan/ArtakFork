@@ -65,6 +65,7 @@ jobs:
             -DIWINFO_SUPPORT=OFF -DRPCSYS_SUPPORT=OFF -DFILE_SUPPORT=OFF -DUCODE_SUPPORT=OFF
           cmake --build "$RUNNER_TEMP/rpcd-build" --parallel 2
           cmake --install "$RUNNER_TEMP/rpcd-build"
+          strings "$prefix/sbin/rpcd" | grep -F "$prefix/libexec/rpcd"
           cmake -S "$RUNNER_TEMP/ucode-src" -B "$RUNNER_TEMP/ucode-build" \
             -DCMAKE_PREFIX_PATH="$prefix" -DUCI_SUPPORT=ON -DFS_SUPPORT=ON \
             -DDIGEST_SUPPORT=OFF -DFFI_SUPPORT=OFF
@@ -92,4 +93,6 @@ jobs:
           export ARTAK_TEST_PREFIX="$RUNNER_TEMP/awg-deps"
           export ARTAK_TEST_UCODE="$RUNNER_TEMP/ucode-build/ucode"
           export ARTAK_TEST_UCODE_MODULES="$RUNNER_TEMP/ucode-build"
-          bash tests/amnezia_real_rpcd.sh
+          # ubusd rejects publishing and accessing objects for non-root clients
+          # without explicit system ACLs; OpenWrt's rpcd runs as root.
+          sudo --preserve-env=LD_LIBRARY_PATH,ARTAK_TEST_PREFIX,ARTAK_TEST_UCODE,ARTAK_TEST_UCODE_MODULES bash tests/amnezia_real_rpcd.sh
