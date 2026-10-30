@@ -18,6 +18,7 @@ for package in forkop luci-app-forkop; do
 done
 apk --allow-untrusted --simulate add /tmp/forkop.apk /tmp/luci-app-forkop.apk >/dev/null
 apk --allow-untrusted add /tmp/forkop.apk /tmp/luci-app-forkop.apk >/dev/null
+command -v timeout >/dev/null || { echo 'APK failed to install required timeout dependency' >&2; exit 1; }
 apk add sing-box >/dev/null
 /etc/init.d/rpcd restart
 echo 'E2E stage: inspect installed rpcd plugin'
