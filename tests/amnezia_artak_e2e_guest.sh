@@ -63,7 +63,14 @@ while :; do
     count=$((count+1)); [ "$count" -lt 120 ] || { echo 'import timed out' >&2; exit 1; }
     sleep 1
 done
-test "$state" = done || { echo "import failed: $state" >&2; exit 1; }
+if [ "$state" != done ]; then
+    echo "import failed: $state" >&2
+    echo 'E2E stage: retry isolated worker for sanitized result'
+    ucode -L /usr/lib/forkop -e 'let f=require("fs"), w=require("subscription.amnezia_manual_worker");let r=w.run(f.readfile("/tmp/e2e.conf"),"e2etest");print(sprintf("worker ok=%J error=%J cleanup_required=%J\n",r?.ok,r?.error,r?.cleanup_required));' || :
+    ubus call network get_proto_handlers 2>/dev/null | grep -o '"amneziawg"' || :
+    logread | grep -E 'netifd|forkop|rpcd' | tail -35 | sed -E 's/[A-Za-z0-9+\/]{42,43}=/[REDACTED]/g' || :
+    exit 1
+fi
 iface=$(jsonfilter -i /tmp/e2e-status -e '@.name')
 case "$iface" in afawg_*) ;; *) echo 'invalid interface name' >&2; exit 1;; esac
 awg show "$iface" latest-handshakes | awk 'NR==1 && $2>0 {ok=1} END {exit !ok}'
