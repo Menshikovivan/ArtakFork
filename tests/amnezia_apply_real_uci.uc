@@ -13,6 +13,7 @@ function runner(args) {
     return { ok: true, output: '' };
 }
 let opts = { config_dir: dir, lock_dir: dir + '/apply-lock', runner,
+    runtime_runner: function(args) { return { ok: true, output: '[]' }; },
     now: function() { return ticks; }, pause: function(n) { ticks += n; } };
 let first = apply.apply(fixture, 'afawg_case', '16900', '1100', 1000, opts);
 expect(first.ok, 'Apply failed: ' + first.error);

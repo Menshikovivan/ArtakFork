@@ -6,6 +6,7 @@ let uci = require('uci');
 let importer = require('subscription.amnezia_import');
 let routes = require('subscription.amnezia_routes');
 let activation = require('subscription.amnezia_activate');
+let runtime_check = require('subscription.amnezia_runtime_check');
 
 function normalized(section) {
     if (type(section) != 'object') return null;
@@ -29,6 +30,8 @@ function apply(text, name, table, priority, timeout_ms, opts) {
         // network reload. Refuse if present; this does not eliminate races.
         if (config_dir == '/etc/config' && fs.stat('/tmp/.uci/network') != null)
             return { ok: false, error: 'Pending network changes detected; apply or discard them first' };
+        let available = runtime_check.check(table, priority, opts.runtime_runner);
+        if (!available.ok) return available;
         if (!fs.chmod(lock_dir, 448) || !fs.mkdir(delta))
             return { ok: false, error: 'Could not create private UCI workspace' };
         created_delta = true;
@@ -50,6 +53,8 @@ function apply(text, name, table, priority, timeout_ms, opts) {
         committed = true;
         if (config_dir == '/etc/config' && fs.stat('/tmp/.uci/network') != null)
             return { ok: false, error: 'Pending network changes appeared; inspect owned configuration' };
+        available = runtime_check.check(table, priority, opts.runtime_runner);
+        if (!available.ok) return { ok: false, error: 'Kernel routing changed; inspect owned configuration' };
         let started = activation.start(name, addresses, timeout_ms, opts.runner, opts.pause, opts.now);
         if (started.ok) return { ok: true, name };
         if (!activation.stop(name, opts.runner).ok)
