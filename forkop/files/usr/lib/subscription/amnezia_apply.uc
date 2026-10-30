@@ -77,11 +77,13 @@ function apply_internal(text, name, table, priority, timeout_ms, opts, lease) {
         available = runtime_check.check(table, priority, opts.runtime_runner);
         if (!available.ok) return { ok: false, error: 'Kernel routing changed; inspect owned configuration' };
         if (borrowed && !valid_lease(lease)) return {ok:false,error:'AWG lock lost after commit; inspect network'};
+        let failure_code = 'interface_not_ready';
         let started = activation.start(name, addresses, timeout_ms, opts.runner, opts.pause, opts.now);
         if (started.ok) {
             let verified = handshake.verify(name, peer, timeout_ms, opts.handshake_runner || opts.runner,
                 opts.pause, opts.now, opts.wall);
             if (verified.ok) return { ok: true, name, table, priority };
+            failure_code = verified.error == 'Recent AWG handshake not observed' ? 'handshake_timeout' : 'handshake_check_failed';
         }
         if (borrowed && !valid_lease(lease)) return {ok:false,error:'AWG lock lost; inspect network'};
         if (!activation.stop(name, opts.runner).ok)
@@ -101,7 +103,7 @@ function apply_internal(text, name, table, priority, timeout_ms, opts, lease) {
         if (borrowed && !valid_lease(lease)) return {ok:false,error:'AWG lock lost before reload; inspect network'};
         if (!activation.reload(opts.runner).ok)
             return { ok: false, error: 'Configuration removed but network reload failed' };
-        return { ok: false, error: 'Activation failed; owned configuration removed' };
+        return { ok: false, error: 'Activation failed; owned configuration removed', diagnostic: failure_code };
     }
     catch (e) {
         return { ok: false, error: committed ? 'Apply failed after commit; inspect network configuration' : 'Apply failed before commit' };

@@ -26,7 +26,7 @@ function activate(text, source, identity, dirs, opts) {
         if (type(chosen) != 'object' || chosen.ok !== true) return { ok: false, error: 'Cannot allocate interface' };
         if (opts.current() !== true) return { ok: false, error: 'Manual source changed' };
         let applied = session.apply(text, chosen.name, chosen.table, chosen.priority, 5000);
-        if (type(applied) != 'object' || applied.ok !== true) return { ok: false, error: 'Interface activation failed' };
+        if (type(applied) != 'object' || applied.ok !== true) return { ok: false, error: 'Interface activation failed', diagnostic: applied?.diagnostic || 'activation_failed' };
         let cleanup = function() {
             try { let result = session.cleanup(text, chosen.name, chosen.table, chosen.priority); return result && result.ok === true; }
             catch (e) { return false; }
@@ -50,7 +50,7 @@ function activate(text, source, identity, dirs, opts) {
         let result = null;
         try { result = manual.publish(dirs.candidate, dirs.last_good, dirs.active, source, identity, candidate.revision, chosen, verify, dirs.generation); }
         catch (e) {}
-        if (type(result) != 'object' || !result.ok) return { ok: false, error: 'Manual publication failed', cleanup_required: !cleanup() };
+        if (type(result) != 'object' || !result.ok) return { ok: false, error: 'Manual publication failed', diagnostic: 'publication_failed', cleanup_required: !cleanup() };
         return { ok: true, source, identity, revision: candidate.revision, name: chosen.name };
     });
 }

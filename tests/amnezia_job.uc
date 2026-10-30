@@ -18,6 +18,12 @@ expect(job.status().state == 'failed' && fs.stat(root + '/input') == null, 'fail
 expect(job.start(config, function() { return true; }).ok, 'restart after failure');
 job.run(function() { die('SECRET_DO_NOT_LOG'); });
 expect(job.status().state == 'failed' && index(sprintf('%J', job.status()), 'SECRET_DO_NOT_LOG') < 0, 'worker failure redacted');
+expect(job.start(config, function() { return true; }).ok, 'diagnostic job starts');
+job.run(function() { return {ok:false, diagnostic:'handshake_timeout', error:key}; });
+expect(job.status().diagnostic == 'handshake_timeout' && index(sprintf('%J', job.status()), key) < 0, 'fixed diagnostic is returned without secret');
+expect(job.start(config, function() { return true; }).ok, 'untrusted diagnostic job starts');
+job.run(function() { return {ok:false, diagnostic:key}; });
+expect(job.status().diagnostic == 'unknown' && index(sprintf('%J', job.status()), key) < 0, 'untrusted diagnostic is redacted');
 fs.writefile(root + '/state.json', sprintf('%J', {state:'done', name:'afawg_2', secret:key}));
 expect(index(sprintf('%J', job.status()), key) < 0, 'status strips unexpected fields');
 print('AmneziaWG job lifecycle checks passed\n');

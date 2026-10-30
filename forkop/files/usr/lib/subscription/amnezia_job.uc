@@ -3,6 +3,10 @@ let fs = require('fs');
 let common = require('core.common');
 let parser = require('subscription.amnezia_conf');
 let root = getenv('ARTAK_AWG_JOB_TEST_DIR') || '/tmp/artak-awg-job';
+// Only fixed internal codes may cross the RPC boundary; never expose errors or input.
+function safe_diagnostic(code) {
+    return index(['interface_not_ready', 'handshake_timeout', 'handshake_check_failed', 'activation_failed', 'publication_failed'], code) >= 0 ? code : 'unknown';
+}
 function private_root(create) {
     let self = fs.stat('/proc/self');
     if (self == null) return false;
@@ -37,7 +41,7 @@ function status() {
     }
     if (state.state == 'done' && type(state.name) == 'string' && match(state.name, /^afawg_[a-z0-9]{1,8}$/))
         return { ok: true, state: 'done', name: state.name };
-    if (state.state == 'failed') return { ok: true, state: 'failed' };
+    if (state.state == 'failed') return { ok: true, state: 'failed', diagnostic: safe_diagnostic(state.diagnostic), cleanup_required: state.cleanup_required === true };
     return { ok: false, state: 'unknown' };
 }
 function start(config, launcher, section) {
@@ -68,7 +72,7 @@ function run(driver) {
     try { if (type(request) == 'object' && type(request.config) == 'string') result = driver(request.config, request.section); } catch (e) {}
     let state = type(result) == 'object' && result.ok === true &&
         type(result.name) == 'string' && match(result.name, /^afawg_[a-z0-9]{1,8}$/) ?
-        { state: 'done', name: result.name } : { state: 'failed' };
+        { state: 'done', name: result.name } : { state: 'failed', diagnostic: safe_diagnostic(result?.diagnostic), cleanup_required: result?.cleanup_required === true };
     if (write_state(state)) fs.rmdir(root + '/lock');
     // A failed state write retains the lock; never silently allow another apply.
 }
