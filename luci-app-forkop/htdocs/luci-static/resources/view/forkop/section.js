@@ -17,7 +17,7 @@ const awgPreflightRpc = rpc.declare({
   params: ["config"],
 });
 const awgImportRpc = rpc.declare({
-  object: "luci.artak_awg", method: "import_conf", params: ["config"],
+  object: "luci.artak_awg", method: "import_conf", params: ["config", "section"],
 });
 const awgImportStatusRpc = rpc.declare({ object: "luci.artak_awg", method: "import_status", params: [] });
 
@@ -56,7 +56,7 @@ function showAmneziaPreflight() {
     E("button", { type: "button", class: "btn", click: () => ui.hideModal() }, "Закрыть"),
   ]);
 }
-function showAmneziaImport() {
+function showAmneziaImport(_event, sectionId) {
   const input = E("input", { type: "file", accept: ".conf,text/plain" });
   const status = E("p", { role: "status" }, "Выберите файл размером до 64 КиБ.");
   const action = E("button", { type: "button", class: "btn cbi-button cbi-button-action", disabled: true }, "Создать интерфейс");
@@ -68,7 +68,7 @@ function showAmneziaImport() {
       try { result = await awgImportStatusRpc(); } catch (_error) { continue; }
       if (!result || !result.ok) continue;
       if (result.state === "stale") { status.textContent = "Задача не завершилась вовремя. Проверьте состояние интерфейсов и журнал роутера; повторный импорт заблокирован."; return; }
-      if (result.state === "done") { status.textContent = "Интерфейс создан: " + result.name + ". Добавьте его в настройку соединения Forkop."; return; }
+      if (result.state === "done") { status.textContent = "Интерфейс создан: " + result.name + ". Чтобы применить новый узел, перезапустите Forkop с включённой экспериментальной поддержкой AWG."; return; }
       if (result.state === "failed") { status.textContent = "Импорт не завершён. Проверьте интерфейсы и журнал роутера перед повторной попыткой."; return; }
     }
     status.textContent = "Нет окончательного результата. Проверьте состояние интерфейсов и журнал роутера перед повторной попыткой.";
@@ -85,7 +85,7 @@ function showAmneziaImport() {
     action.disabled = true;
     status.textContent = "Создание и проверка соединения…";
     try {
-      const result = await awgImportRpc(await file.text());
+      const result = await awgImportRpc(await file.text(), sectionId);
       if (result && result.ok && result.state === "running") await poll();
       else status.textContent = "Не удалось начать импорт. Проверьте состояние интерфейсов и журнал роутера перед повторной попыткой.";
     } catch (_error) {

@@ -31,6 +31,11 @@ trap 'rm -rf "$WORK_DIR"' EXIT HUP INT TERM
 cd "$WORK_DIR"
 download "$BASE_URL/SHA256SUMS" SHA256SUMS
 FILES="$ENGINE_FILE"
+AWG_SUPPORTED=0
+if [ "${DISTRIB_RELEASE:-}" = 25.12.6 ] && [ "${DISTRIB_TARGET:-}" = mediatek/filogic ]; then
+    AWG_SUPPORTED=1
+    FILES="$FILES install-awg-dependencies.sh"
+fi
 for package in forkop luci-app-forkop luci-i18n-forkop-ru; do
     FILES="$FILES upstream-${package}_${BASE_VERSION}.apk ${package}_${VERSION}.apk"
 done
@@ -46,7 +51,7 @@ for file in $FILES; do
     sha256sum -c "$file.sha256" || fail "Checksum failed: $file"
 done
 if [ "$CHECK_ONLY" = 1 ]; then
-    echo "ArtakFork $VERSION: all seven APK checksums verified; no configuration or packages changed."
+    echo "ArtakFork $VERSION: downloaded files verified; no configuration or packages changed."
     exit 0
 fi
 HAS_FORKOP=0
@@ -78,6 +83,11 @@ if [ "$HAS_FORKOP" = 0 ]; then
 fi
 apk --simulate add --allow-untrusted "$@" \
     "./forkop_${VERSION}.apk" "./luci-app-forkop_${VERSION}.apk" "./luci-i18n-forkop-ru_${VERSION}.apk"
+if [ "$AWG_SUPPORTED" = 1 ]; then
+    sh ./install-awg-dependencies.sh "$VERSION" || fail 'AmneziaWG dependency installation failed.'
+else
+    echo 'AmneziaWG dependencies are not available for this OpenWrt target; installing ArtakFork without them.'
+fi
 if [ "$CHANGE_ENGINE" = 1 ]; then
     [ ! -x /etc/init.d/forkop ] || /etc/init.d/forkop stop
     # Stop only a standalone engine when replacing its binary. Same-version

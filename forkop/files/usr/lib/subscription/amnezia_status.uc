@@ -28,6 +28,7 @@ function save(dir, active_dir, good_dir, source, url, user_agent, hwid, identity
         active.peek(active_dir, source, identity) != revision ||
         store.revision(good_dir + '/' + revision, source, identity) != revision) return false;
     let record = { version: 1, source, url, user_agent, hwid, identity, revision };
+    if (length(sprintf('%J\n', record)) > 16384) return false;
     let t = clock(), tmp = sprintf('%s/.%s-%d-%d.tmp', dir, source, t[0], t[1]);
     if (common.write_private_json_file(tmp, record) == null) { fs.unlink(tmp); return false; }
     if (!fs.rename(tmp, dir + '/' + source + '.json')) { fs.unlink(tmp); return false; }

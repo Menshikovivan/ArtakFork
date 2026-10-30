@@ -849,7 +849,7 @@ function source_cache_profile_matches(parsed, cached_url, cached_user_agent, cac
 // A stored status alone is insufficient: verify the current tunnel and its
 // immutable last-good config before reporting the source usable.
 function awg_current_status(source, parsed) {
-    if (as_string(getenv('FORKOP_AWG_EXPERIMENTAL')) != '1') return null;
+    if (!require('subscription.amnezia_feature').enabled()) return null;
     let status_dir = getenv('FORKOP_AWG_STATUS_DIR') || '/etc/forkop/awg-subscription-status';
     let active_dir = getenv('FORKOP_AWG_ACTIVE_DIR') || '/etc/forkop/awg-active';
     let good_dir = getenv('FORKOP_AWG_LAST_GOOD_DIR') || '/etc/forkop/awg-last-good';
@@ -1966,7 +1966,7 @@ function download_subscription_into_cache(section_name_value, subscription_url, 
         // subscription or activating it. Invalid data leaves old candidates
         // and the running tunnel untouched; mixed legacy proxies still import.
         let awg_status = 1;
-        if ((as_string(getenv('FORKOP_AWG_STAGE_CANDIDATES')) == '1' || as_string(getenv('FORKOP_AWG_EXPERIMENTAL')) == '1') &&
+        if ((as_string(getenv('FORKOP_AWG_STAGE_CANDIDATES')) == '1' || require('subscription.amnezia_feature').enabled()) &&
             subscription_config_is_current(section_name_value, subscription_url, subscription_user_agent, subscription_hwid, sections)) {
             awg_status = stage_awg_subscription_candidate(raw_tmpfile, cache_section, subscription_url, effective_user_agent, effective_hwid);
             if (awg_status == 2)
@@ -1974,7 +1974,7 @@ function download_subscription_into_cache(section_name_value, subscription_url, 
         }
 
         if (!parser.normalize_content_validated(raw_tmpfile, normalized_tmpfile)) {
-            if (as_string(getenv('FORKOP_AWG_EXPERIMENTAL')) == '1' && awg_status == 0 &&
+            if (require('subscription.amnezia_feature').enabled() && awg_status == 0 &&
                 require('subscription.amnezia_subscription').only_awg(fs.readfile(raw_tmpfile))) {
                 let activated = activate_awg_only(section_name_value, cache_section, subscription_url, subscription_user_agent,
                     subscription_hwid, effective_user_agent, effective_hwid, raw_tmpfile);
@@ -1988,6 +1988,20 @@ function download_subscription_into_cache(section_name_value, subscription_url, 
             else
                 log_message("Downloaded subscription for rule '" + section_name_value + "' is invalid; trying another compatibility profile", "warn");
             continue;
+        }
+
+        // Switching an active AWG-only source to another format requires the
+        // same transactional interface/guard swap as an AWG profile update.
+        // Keep both the running profile and its status until that exists.
+        if (require('subscription.amnezia_feature').enabled()) {
+            let status_dir = getenv('FORKOP_AWG_STATUS_DIR') || '/etc/forkop/awg-subscription-status';
+            let previous = require('subscription.amnezia_status').read(status_dir, cache_section);
+            let id = awg_subscription_source_identity(cache_section, subscription_url, effective_user_agent, effective_hwid);
+            if (previous != null && previous.identity == id) {
+                unlink_path(raw_tmpfile); unlink_path(headers_tmpfile); unlink_path(normalized_tmpfile); unlink_path(metadata_tmpfile);
+                log_message('Changing an active AWG-only source requires a coordinated update; previous configuration retained', 'warn');
+                return 1;
+            }
         }
 
         if (!subscription_share_link.populate_subscription_file(normalized_tmpfile))

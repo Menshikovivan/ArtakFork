@@ -56,7 +56,7 @@ python3 - "$WORK/request.json" <<'PY'
 import json, sys
 key = 'A' * 43 + '='
 config = '[Interface]\nPrivateKey = '+key+'\nAddress = 10.0.0.2/32\n[Peer]\nPublicKey = '+key+'\nEndpoint = example.com:443\nAllowedIPs = 0.0.0.0/0\n'
-with open(sys.argv[1], 'w') as f: json.dump({'config': config}, f)
+with open(sys.argv[1], 'w') as f: json.dump({'config': config, 'section': 'test_rule'}, f)
 PY
 "$ARTAK_TEST_PREFIX/bin/ubus" -s "$WORK/ubus.sock" call luci.artak_awg preflight "$(cat "$WORK/request.json")" > "$WORK/preflight.json"
 "$ARTAK_TEST_PREFIX/bin/ubus" -s "$WORK/ubus.sock" call luci.artak_awg import_conf "$(cat "$WORK/request.json")" > "$WORK/start.json"

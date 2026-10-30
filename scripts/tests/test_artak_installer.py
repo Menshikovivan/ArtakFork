@@ -60,6 +60,9 @@ cp "/fixtures/${3##*/}" "$2"
             data = f'offline dummy package: {name}\n'.encode()
             (self.root / 'fixtures' / name).write_bytes(data)
             hashes.append(f'{hashlib.sha256(data).hexdigest()}  {name}\n')
+        helper = b'#!/bin/sh\necho "awg-deps:$1" >> /events\n'
+        (self.root / 'fixtures/install-awg-dependencies.sh').write_bytes(helper)
+        hashes.append(f'{hashlib.sha256(helper).hexdigest()}  install-awg-dependencies.sh\n')
         (self.root / 'fixtures/SHA256SUMS').write_text(''.join(hashes))
 
     def script(self, name, body):
@@ -68,7 +71,7 @@ cp "/fixtures/${3##*/}" "$2"
         path.chmod(0o755)
 
     def release(self, version):
-        (self.root / 'etc/openwrt_release').write_text(f"DISTRIB_RELEASE='{version}'\nDISTRIB_ARCH='aarch64_cortex-a53'\n")
+        (self.root / 'etc/openwrt_release').write_text(f"DISTRIB_RELEASE='{version}'\nDISTRIB_ARCH='aarch64_cortex-a53'\nDISTRIB_TARGET='mediatek/filogic'\n")
 
     def run_installer(self, *args):
         return subprocess.run(['chroot', str(self.root), '/bin/sh', '/installer.sh', *args],
@@ -86,19 +89,20 @@ cp "/fixtures/${3##*/}" "$2"
     def test_check(self):
         result = self.run_installer('--check')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(len(self.events()), 8)
+        self.assertEqual(len(self.events()), 9)
         self.assertTrue(all(e.startswith('download:') for e in self.events()))
-        self.assertIn('all seven APK checksums verified', result.stdout)
+        self.assertIn('downloaded files verified', result.stdout)
         self.no_mutations()
 
     def test_fresh_bootstrap(self):
         (self.root / 'bin/sing-box').unlink()
         result = self.run_installer()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        events = self.events()[8:]
+        events = self.events()[9:]
         self.assertEqual(events[:2], ['backup', 'update'])
         self.assertTrue(events[2].startswith('simulate:'))
         self.assertTrue(events[3].startswith('simulate:'))
+        self.assertIn('awg-deps:' + VERSION, events)
         installs = [e for e in events if e.startswith('install:')]
         self.assertEqual(len(installs), 3)
         self.assertEqual(installs[0], 'install:add --allow-untrusted ./' + ENGINE)
@@ -115,7 +119,8 @@ cp "/fixtures/${3##*/}" "$2"
         (self.root / 'has-forkop').touch()
         result = self.run_installer()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        events = self.events()[8:]
+        events = self.events()[9:]
+        self.assertIn('awg-deps:' + VERSION, events)
         self.assertEqual(events[:2], ['backup', 'update'])
         installs = [e for e in events if e.startswith('install:')]
         expected = 'install:add --allow-untrusted ' + ' '.join(f'./{p}_{VERSION}.apk' for p in PACKAGES)
@@ -128,7 +133,7 @@ cp "/fixtures/${3##*/}" "$2"
     def test_missing_forkop_matching_engine_installs_base_and_own_only(self):
         result = self.run_installer()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        events = self.events()[8:]
+        events = self.events()[9:]
         self.assertEqual(events[:2], ['backup', 'update'])
         installs = [e for e in events if e.startswith('install:')]
         expected_base = 'install:add --allow-untrusted ' + ' '.join(
@@ -145,7 +150,7 @@ cp "/fixtures/${3##*/}" "$2"
         (self.root / 'simulate-fail').touch()
         result = self.run_installer()
         self.assertNotEqual(result.returncode, 0)
-        events = self.events()[8:]
+        events = self.events()[9:]
         self.assertEqual(events[:2], ['backup', 'update'])
         self.assertEqual(len([e for e in events if e.startswith('simulate:')]), 1)
         self.assertFalse(any(e.startswith(('install:', 'forkop:', 'engine:')) for e in events))

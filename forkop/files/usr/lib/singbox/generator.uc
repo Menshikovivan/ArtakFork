@@ -853,13 +853,13 @@ function assert_unique_outbound_tags(config) {
 // Experimental until the runtime guard exists and has been installed. A live
 // interface/handshake check alone cannot protect traffic after an interface
 // disappears. Refuse to emit an outbound if any prerequisite is unavailable.
-function add_awg_subscription_source(config, section, source_section, source_entry, taken, selector_tags, urltest_candidate_tags, state) {
-    if (getenv('FORKOP_AWG_EXPERIMENTAL') != '1') return 0;
+function add_awg_subscription_source(config, section, source_section, source_entry, taken, selector_tags, urltest_candidate_tags, state, manual_identity) {
+    if (!require('subscription.amnezia_feature').enabled()) return 0;
     let candidate_dir = getenv('FORKOP_AWG_CANDIDATE_DIR') || '/etc/forkop/awg-subscription-candidates';
     let last_good_dir = getenv('FORKOP_AWG_LAST_GOOD_DIR') || '/etc/forkop/awg-last-good';
     let active_dir = getenv('FORKOP_AWG_ACTIVE_DIR') || '/etc/forkop/awg-active';
     try {
-        let identity = runtime_subscription.awg_source_identity(source_section, source_entry,
+        let identity = manual_identity || runtime_subscription.awg_source_identity(source_section, source_entry,
             connections.subscription_user_agent(section, source_entry), connections.subscription_hwid(section, source_entry), candidate_dir);
         if (identity == null) return 0;
         let cursor = uci_cursor();
@@ -911,6 +911,23 @@ function add_awg_subscription_source(config, section, source_section, source_ent
 function add_subscription_source_with_state(config, section, source_index, source_entry, taken, selector_tags, urltest_candidate_tags, state, show_metadata, include_urltest_groups, hide_urltest_group_outbounds, hide_detour_outbounds, node_prefix) {
     let section_name = section[".name"];
     let source_section = runtime_subscription.source_id(section_name, source_index);
+    // A successfully promoted AWG-only source supersedes a retained legacy
+    // cache. Do not accidentally resurrect old VLESS nodes after migration.
+    if (require('subscription.amnezia_feature').enabled()) {
+        let status_dir = getenv('FORKOP_AWG_STATUS_DIR') || '/etc/forkop/awg-subscription-status';
+        let candidate_dir = getenv('FORKOP_AWG_CANDIDATE_DIR') || '/etc/forkop/awg-subscription-candidates';
+        let status = require('subscription.amnezia_status').read(status_dir, source_section);
+        // A corrupt or mismatched status must not silently resurrect an old
+        // legacy cache. Require a fresh verified update to resolve it.
+        if (status == null && fs.stat(status_dir + '/' + source_section + '.json') != null) return 0;
+        if (status != null) {
+            let identity = runtime_subscription.awg_source_identity(source_section, source_entry,
+                connections.subscription_user_agent(section, source_entry), connections.subscription_hwid(section, source_entry), candidate_dir);
+            if (identity != null && identity == status.identity)
+                return add_awg_subscription_source(config, section, source_section, source_entry, taken, selector_tags, urltest_candidate_tags, state);
+            return 0;
+        }
+    }
     if (!runtime_subscription.source_cache_is_current(
         source_section,
         source_entry,
@@ -2480,6 +2497,9 @@ function add_connections_outbound(config, section, taken) {
 
     add_connection_manual_links(config, state, section, taken, selector_tags, urltest_candidate_tags);
     add_connection_subscriptions(config, state, section, taken, selector_tags, urltest_candidate_tags);
+    let manual_source = require('subscription.amnezia_manual_source').from_id(section.manual_awg_id);
+    if (manual_source != null)
+        add_awg_subscription_source(config, section, manual_source.source, '', taken, selector_tags, urltest_candidate_tags, state, manual_source.identity);
     // Apply before interface and JSON items are added: those source kinds are intentionally excluded.
     apply_section_detour_to_connection_outbounds(
         config,
@@ -3756,7 +3776,15 @@ function build_awg_snapshot() {
     let active_dir = getenv('FORKOP_AWG_ACTIVE_DIR') || '/etc/forkop/awg-active';
     let snapshot_dir = getenv('FORKOP_AWG_SNAPSHOT_DIR') || '/etc/forkop/awg-snapshot';
     let sources = [];
+    let manual_seen = {};
     for (let section in enabled_sections('')) {
+        let manual_source = require('subscription.amnezia_manual_source').from_id(section.manual_awg_id);
+        if (manual_source != null) {
+            if (manual_seen[manual_source.source]) return false;
+            manual_seen[manual_source.source] = true;
+            if (fs.stat(active_dir + '/' + manual_source.source + '.json') != null)
+                push(sources, manual_source);
+        }
         let urls = connections.subscription_urls(section);
         for (let i = 0; i < length(urls); i++) {
             let source = runtime_subscription.source_id(section['.name'], i + 1);

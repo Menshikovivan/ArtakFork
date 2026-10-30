@@ -3,7 +3,7 @@ let fs = require("fs");
 let parser = require("subscription.amnezia_conf");
 function reply(value) { print(sprintf("%J\n", value)); }
 if (ARGV[0] == "list") {
-    reply({ preflight: { config: "" }, import_conf: { config: "" }, import_status: {} });
+    reply({ preflight: { config: "" }, import_conf: { config: "", section: "" }, import_status: {} });
     exit(0);
 }
 if (ARGV[0] != "call" || (ARGV[1] != "preflight" && ARGV[1] != "import_conf" && ARGV[1] != "import_status")) exit(1);
@@ -20,13 +20,16 @@ if (type(request) != "object" || (ARGV[1] != "import_status" && (type(request.co
 try {
     if (ARGV[1] == "import_conf") {
         let job = require("subscription.amnezia_job");
+        if (type(request.section) != 'string' || !match(request.section, /^[A-Za-z0-9_]{1,80}$/)) {
+            reply({ ok: false, error: 'Invalid rule section' }); exit(0);
+        }
         reply(job.start(request.config, function() {
             let pipe = fs.popen("ucode -L /usr/lib/forkop /usr/lib/forkop/subscription/amnezia_job_worker.uc </dev/null >/dev/null 2>&1 & echo $!", "r");
             if (!pipe) return false;
             let pid = trim(pipe.read("all") || "");
             let result = pipe.close();
             return result == 0 && match(pid, /^[0-9]+$/) != null;
-        }));
+        }, request.section));
         exit(0);
     }
     if (ARGV[1] == "import_status") { reply(require("subscription.amnezia_job").status()); exit(0); }

@@ -198,6 +198,14 @@ function configureDnsDuration(
 }
 
 function createSettingsContent(section, capabilities) {
+  const awgExperimental = section.option(
+    form.Flag,
+    "awg_experimental",
+    "AmneziaWG: экспериментальная поддержка",
+    "Включает импорт .conf и подписок AmneziaWG. Для применения сохраните настройки и перезапустите Forkop. Режим проходит проверку и может прервать соединение.",
+  );
+  awgExperimental.default = "0";
+  awgExperimental.rmempty = false;
   const renderSettings = section.render;
   section.render = function () {
     return Promise.resolve(renderSettings.apply(this, arguments)).then(

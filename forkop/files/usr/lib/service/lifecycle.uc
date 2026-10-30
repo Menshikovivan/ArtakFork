@@ -727,11 +727,15 @@ function nft_rebuild_runtime() {
         SB_FAKEIP_INET6_RANGE,
         SB_TPROXY_INBOUND6_ADDRESS
     ]);
-    if (status != 0 || getenv('FORKOP_AWG_EXPERIMENTAL') != '1') return status;
+    if (status != 0) return status;
+    let dir = getenv('FORKOP_AWG_SNAPSHOT_DIR') || '/etc/forkop/awg-snapshot';
+    // On disable, retain an existing guard: the old sing-box process can still
+    // be running while the new nft transaction is prepared. An invalid saved
+    // snapshot fails closed rather than silently removing that protection.
+    if (!require('subscription.amnezia_feature').enabled() && fs.stat(dir + '/snapshot.json') == null) return status;
     // The same immutable snapshot must also be checked by the generator. Never
     // commit a candidate for AWG if its guard cannot be staged atomically.
     if (!acquire_awg_network_lock()) return 1;
-    let dir = getenv('FORKOP_AWG_SNAPSHOT_DIR') || '/etc/forkop/awg-snapshot';
     let s = require('subscription.amnezia_snapshot').load(dir);
     if (s == null) return 1;
     return module_status(NFT_UC, [ 'nft-add-awg-guards', NFT_TABLE_NAME, dir, s.revision ]);
@@ -1021,7 +1025,7 @@ function start_main() {
         }
     }
 
-    if (getenv('FORKOP_AWG_EXPERIMENTAL') == '1') {
+    if (require('subscription.amnezia_feature').enabled()) {
         if (!acquire_awg_network_lock()) return start_phase_failed('awg-network-lock', 1);
         let result = module_capture(LIB_DIR + '/singbox/generator.uc', ['amnezia-snapshot-build']);
         if (result.status != 0 || !match(trim(result.output), /^[0-9a-f]{64}$/))

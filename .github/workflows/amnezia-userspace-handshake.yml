@@ -1,0 +1,51 @@
+name: AmneziaWG userspace handshake
+
+on:
+  push:
+    paths:
+      - 'tests/amnezia_userspace_handshake.sh'
+      - '.github/workflows/amnezia-userspace-handshake.yml'
+  pull_request:
+    paths:
+      - 'tests/amnezia_userspace_handshake.sh'
+      - '.github/workflows/amnezia-userspace-handshake.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  userspace-peers:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      AWG_TOOLS_COMMIT: ee0f0a9aa34ff0a0da4b3433b9512781cfe02843
+      AWG_GO_COMMIT: b5928efb6ca19f0153958460c3d141f04abc5c2e
+    steps:
+      - uses: actions/checkout@v5.0.0
+      - uses: actions/setup-go@v6.0.0
+        with:
+          go-version: '1.25.x'
+          cache: false
+      - name: Build pinned upstream userspace implementations
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone https://github.com/amnezia-vpn/amneziawg-tools.git "$RUNNER_TEMP/awg-tools"
+          git -C "$RUNNER_TEMP/awg-tools" checkout --detach "$AWG_TOOLS_COMMIT"
+          test "$(git -C "$RUNNER_TEMP/awg-tools" rev-parse HEAD)" = "$AWG_TOOLS_COMMIT"
+          make -C "$RUNNER_TEMP/awg-tools/src" -j2
+          git clone https://github.com/amnezia-vpn/amneziawg-go.git "$RUNNER_TEMP/awg-go"
+          git -C "$RUNNER_TEMP/awg-go" checkout --detach "$AWG_GO_COMMIT"
+          test "$(git -C "$RUNNER_TEMP/awg-go" rev-parse HEAD)" = "$AWG_GO_COMMIT"
+          (cd "$RUNNER_TEMP/awg-go" && go build -o "$RUNNER_TEMP/amneziawg-go" .)
+      - name: Exercise 2.0 and 3.1 tunnels in namespaces
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo modprobe tun || true
+          if [ ! -c /dev/net/tun ]; then
+            sudo mkdir -p /dev/net
+            sudo mknod /dev/net/tun c 10 200
+          fi
+          sudo sh tests/amnezia_userspace_handshake.sh "$RUNNER_TEMP/awg-tools/src/wg" "$RUNNER_TEMP/amneziawg-go"

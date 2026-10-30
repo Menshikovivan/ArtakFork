@@ -4,8 +4,24 @@
 let store = require('subscription.amnezia_store');
 let active = require('subscription.amnezia_active');
 let conf = require('subscription.amnezia_conf');
+let fs = require('fs');
+// ID is public metadata persisted in its owning Forkop UCI section. A new ID
+// must be generated on creation; it must not be reused for a recreated rule.
+function new_id() {
+    let random = fs.open('/dev/urandom', 'r');
+    if (!random) return null;
+    let bytes = random.read(16); random.close();
+    if (type(bytes) != 'string' || length(bytes) != 16) return null;
+    let value = '';
+    for (let i = 0; i < 16; i++) value += sprintf('%02x', ord(substr(bytes, i, 1)) & 255);
+    return value;
+}
+function from_id(id) {
+    if (type(id) != 'string' || !match(id, /^[0-9a-f]{32}$/)) return null;
+    return { source: 'manual_' + id, identity: id + id };
+}
 function valid(source, identity) {
-    return type(source) == 'string' && match(source, /^manual_[a-z0-9_]{1,80}$/) != null &&
+    return type(source) == 'string' && match(source, /^manual_[A-Za-z0-9_]{1,80}$/) != null &&
         type(identity) == 'string' && match(identity, /^[0-9a-f]{64}$/) != null;
 }
 // No secrets in result. A new candidate does not alter the active manifest.
@@ -42,4 +58,4 @@ function restore(last_good_dir, active_dir, source, identity, cursor, timeout_ms
     if (!valid(source, identity)) return null;
     return require('subscription.amnezia_restore').restore(last_good_dir, active_dir, source, identity, cursor, timeout_ms, opts);
 }
-return { stage, publish, restore };
+return { stage, publish, restore, new_id, from_id };

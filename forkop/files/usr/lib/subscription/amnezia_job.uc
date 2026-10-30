@@ -26,13 +26,15 @@ function status() {
     if (state.state == 'failed') return { ok: true, state: 'failed' };
     return { ok: false, state: 'unknown' };
 }
-function start(config, launcher) {
+function start(config, launcher, section) {
     if (type(config) != 'string' || length(config) > 65536 || !parser.parse_conf(config).ok)
         return { ok: false, error: 'Invalid configuration' };
+    if (section != null && (type(section) != 'string' || !match(section, /^[A-Za-z0-9_]{1,80}$/)))
+        return { ok: false, error: 'Invalid rule section' };
     if (!common.secure_private_dir(root)) return { ok: false, error: 'Unable to prepare job' };
     // Atomic mkdir prevents parallel start requests, including finished-job cleanup races.
     if (!fs.mkdir(root + '/lock', 0700)) return { ok: false, error: 'Job is active or requires inspection' };
-    if (common.write_private_file(root + '/input', config) == null || !write_state({ state: 'running', started: time() })) {
+    if (common.write_private_json_file(root + '/input', { config, section }) == null || !write_state({ state: 'running', started: time() })) {
         fs.unlink(root + '/input'); fs.rmdir(root + '/lock'); return { ok: false, error: 'Unable to prepare job' };
     }
     let ok = false;
@@ -44,10 +46,11 @@ function start(config, launcher) {
     return { ok: true, state: 'running' };
 }
 function run(driver) {
-    let config = fs.readfile(root + '/input');
+    let raw = fs.readfile(root + '/input'), request = null;
     fs.unlink(root + '/input');
+    try { if (raw != null) request = json(raw); } catch (e) {}
     let result = null;
-    try { if (config != null) result = driver(config); } catch (e) {}
+    try { if (type(request) == 'object' && type(request.config) == 'string') result = driver(request.config, request.section); } catch (e) {}
     let state = type(result) == 'object' && result.ok === true &&
         type(result.name) == 'string' && match(result.name, /^afawg_[a-z0-9]{1,8}$/) ?
         { state: 'done', name: result.name } : { state: 'failed' };
