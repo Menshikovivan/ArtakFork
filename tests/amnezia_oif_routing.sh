@@ -90,4 +90,63 @@ ip -n "$ROUTER" -6 route del default table 16866
 # Record IPv6 behavior; this test does not claim IPv6 fail-closed behavior.
 ip -n "$ROUTER" -6 route get 2001:db8:100::1 oif afawg mark 0x08000000 || true
 ip -n "$ROUTER" -6 route get 2001:db8:100::1 | grep -q 'dev afwan'
+# Observe the WAN peer directly while a socket is bound to the AWG device.
+# Sending may report success on a down UDP interface, so the test must check
+# what actually arrives, not only the result of sendto().
+ip -n "$REMOTE" -6 addr add 2001:db8:100::1/128 dev lo nodad
+cat > "$WORK/watch_udp.py" <<'PY'
+import select, socket, sys, time
+v4 = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+v6 = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+for s in (v4, v6):
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, b'afwanp\0')
+v6.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+v4.bind(('0.0.0.0', 19555)); v6.bind(('::', 19555))
+open(sys.argv[1], 'w').close()
+seen = []
+deadline = time.monotonic() + 4
+while time.monotonic() < deadline:
+    ready, _, _ = select.select([v4, v6], [], [], max(0, deadline - time.monotonic()))
+    for s in ready:
+        seen.append(s.recvfrom(1024)[0].decode())
+open(sys.argv[2], 'w').write('\n'.join(seen))
+PY
+ip netns exec "$REMOTE" python3 "$WORK/watch_udp.py" "$WORK/udp-ready" "$WORK/udp-seen" &
+SERVER=$!
+i=0
+while [ ! -e "$WORK/udp-ready" ]; do
+    i=$((i+1)); [ "$i" -lt 50 ] || exit 1
+    sleep 0.1
+done
+cat > "$WORK/send_udp.py" <<'PY'
+import socket, sys
+family = socket.AF_INET if sys.argv[1] == '4' else socket.AF_INET6
+s = socket.socket(family, socket.SOCK_DGRAM)
+if sys.argv[2] != 'baseline':
+    try:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, b'afawg\0')
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_MARK, 0x08000000)
+    except OSError:
+        sys.exit(0) # The interface has disappeared; no packet can be sent.
+destination = ('203.0.113.77', 19555) if family == socket.AF_INET else ('2001:db8:100::1', 19555)
+try: s.sendto((sys.argv[2] + sys.argv[1]).encode(), destination)
+except OSError: pass
+PY
+ip netns exec "$ROUTER" python3 "$WORK/send_udp.py" 4 baseline
+ip netns exec "$ROUTER" python3 "$WORK/send_udp.py" 6 baseline
+ip -n "$ROUTER" link set afawg down
+ip netns exec "$ROUTER" python3 "$WORK/send_udp.py" 4 down
+ip netns exec "$ROUTER" python3 "$WORK/send_udp.py" 6 down
+ip -n "$ROUTER" link del afawg
+ip netns exec "$ROUTER" python3 "$WORK/send_udp.py" 4 deleted
+ip netns exec "$ROUTER" python3 "$WORK/send_udp.py" 6 deleted
+wait "$SERVER"
+SERVER=''
+grep -qx baseline4 "$WORK/udp-seen"
+grep -qx baseline6 "$WORK/udp-seen"
+if grep -Eq '^(down|deleted)[46]$' "$WORK/udp-seen"; then
+    echo 'Bound UDP packet escaped through WAN during interface failure' >&2
+    exit 1
+fi
+echo 'No bound UDP packets observed on WAN after interface down or deletion'
 echo 'Bound IPv4 sockets use the dedicated interface; ordinary sockets use WAN, including after route deletion'
