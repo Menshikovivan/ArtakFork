@@ -3,6 +3,17 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 WORK=$(mktemp -d /tmp/artak-awg-nft.XXXXXXXX)
 trap 'rm -rf "$WORK"' EXIT HUP INT TERM
+mkdir "$WORK/bin"
+cat > "$WORK/bin/ip" <<'EOF'
+#!/bin/sh
+printf '[]\n'
+EOF
+cat > "$WORK/bin/nft" <<'EOF'
+#!/bin/sh
+printf '{"nftables":[]}\n'
+EOF
+chmod 755 "$WORK/bin/ip" "$WORK/bin/nft"
+export PATH="$WORK/bin:$PATH"
 export ARTAK_SNAPSHOT_TEST_DIR="$WORK/snapshot"
 mkdir "$ARTAK_SNAPSHOT_TEST_DIR"
 REVISION=$(ucode -L "$ROOT/forkop/files/usr/lib" -e '

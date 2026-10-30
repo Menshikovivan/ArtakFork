@@ -5,6 +5,16 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 cp -R "$ROOT/forkop/files/usr/lib" "$WORK/lib"
+# Inject one filesystem fault in the private test copy only, precisely at the
+# legacy JSON rename. All normal downloader and generation code stays real.
+python3 - "$WORK/lib/subscription/cache.uc" <<'PY'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+s = p.read_text()
+needle = 'function move_file(source, target) {\n'
+assert s.count(needle) == 1
+p.write_text(s.replace(needle, needle + "    if (getenv('TEST_FAIL_RENAME') == '1' && index(as_string(source), '.normalized.') >= 0) return false;\n"))
+PY
 mkdir -p "$WORK/bin" "$WORK/singbox" "$WORK/state" "$WORK/persistent"
 chmod 700 "$WORK" "$WORK/singbox" "$WORK/state" "$WORK/persistent"
 export FORKOP_LIB="$WORK/lib" FORKOP_UCI_STATE_FILE="$WORK/uci.state"
@@ -52,6 +62,9 @@ done
 test -n "$out" || exit 1
 cp "$TEST_FEED" "$out"
 [ -z "$headers" ] || printf 'HTTP/1.1 200 OK\r\n\r\n' > "$headers"
+if [ "${TEST_CHANGE_SOURCE:-0}" = 1 ]; then
+ sed -i 's@forkop.test.subscription_urls=https://example.invalid/sub@forkop.test.subscription_urls=https://changed.invalid/sub@' "$FORKOP_UCI_STATE_FILE"
+fi
 SH
 cat > "$WORK/bin/logger" <<'SH'
 #!/bin/sh
@@ -85,4 +98,28 @@ printf 'vpn://invalid\n' >> "$TEST_FEED"
 if run_update; then echo 'invalid AWG accepted' >&2; exit 1; fi
 cmp "$WORK/pointer-before" "$WORK/generation/test-subscription-1.current"
 cmp "$WORK/legacy-before" "$WORK/singbox/subscriptions/test-subscription-1.json"
-echo 'mixed downloader fixture passed'
+
+# A source edited during the HTTP request cannot replace old generation or
+# legacy bytes. Restore the valid feed; the fake curl changes the UCI state.
+sed -i '$d' "$TEST_FEED"
+if TEST_CHANGE_SOURCE=1 run_update; then echo 'changed source was accepted' >&2; exit 1; fi
+cmp "$WORK/pointer-before" "$WORK/generation/test-subscription-1.current"
+cmp "$WORK/legacy-before" "$WORK/singbox/subscriptions/test-subscription-1.json"
+sed -i 's@forkop.test.subscription_urls=https://changed.invalid/sub@forkop.test.subscription_urls=https://example.invalid/sub@' "$FORKOP_UCI_STATE_FILE"
+
+# A failure publishing the mutable JSON after the immutable generation was
+# published must preserve the existing source and leave no partial new JSON.
+cat >> "$WORK/uci.state" <<'STATE'
+forkop.other=section
+forkop.other.enabled=1
+forkop.other.action=connection
+forkop.other.subscription_urls=https://example.invalid/sub
+STATE
+if TEST_FAIL_RENAME=1 ucode -L "$FORKOP_LIB" "$FORKOP_LIB/subscription/cache.uc" update-source other 1 https://example.invalid/sub runtime; then
+ echo 'failed legacy rename was accepted' >&2; exit 1
+fi
+test -s "$WORK/generation/other-subscription-1.current"
+test ! -e "$WORK/singbox/subscriptions/other-subscription-1.json"
+cmp "$WORK/pointer-before" "$WORK/generation/test-subscription-1.current"
+cmp "$WORK/legacy-before" "$WORK/singbox/subscriptions/test-subscription-1.json"
+echo 'mixed downloader: initial, invalid, source change and legacy rename failure passed'

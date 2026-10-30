@@ -80,6 +80,12 @@ function build(dir, candidate_dir, active_dir, sources, cursor, timeout_ms, occu
     }
     let planned = guard.plan(entries, occupied_marks, 0x08000000);
     if (!planned.ok) return null;
+    if (length(planned.guards)) {
+        let audit = type(opts.audit) == 'function' ? opts.audit : require('subscription.amnezia_mark_audit').audit;
+        let marks = map(planned.guards, g => g.mark);
+        let checked = audit(marks);
+        if (type(checked) != 'object' || checked.ok !== true) return null;
+    }
     for (let i = 0; i < length(entries); i++) entries[i].mark = planned.guards[i].mark;
     return save(dir, entries);
 }

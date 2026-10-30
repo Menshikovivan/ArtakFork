@@ -12,6 +12,7 @@ function choose_many(cursor, count, opts) {
         return { ok: false, error: 'Cannot inspect UCI network' };
     let runner = type(opts.runner) == 'function' ? opts.runner : activation.run;
     let check = type(opts.check) == 'function' ? opts.check : runtime.check;
+    let audit = type(opts.audit) == 'function' ? opts.audit : require('subscription.amnezia_mark_audit').audit;
     try {
         if (cursor.load('network') == null) return { ok: false, error: 'Cannot inspect UCI network' };
         let response = runner(['ip', '-j', 'link', 'show']), links = null;
@@ -42,6 +43,12 @@ function choose_many(cursor, count, opts) {
             let current = check(table, priority, runner);
             if (type(current) != 'object') return { ok: false, error: 'Cannot inspect kernel routing' };
             if (current.ok === true) {
+                let mark_check = audit([0x18000000 | int(table)], {runner});
+                if (type(mark_check) != 'object') return {ok:false,error:'Cannot audit marks'};
+                if (mark_check.ok !== true) {
+                    if (mark_check.error == 'IP rule mark conflict' || mark_check.error == 'nft mark writer conflict') continue;
+                    return {ok:false,error:'Cannot audit marks'};
+                }
                 push(allocations, { name, table, priority });
                 if (length(allocations) == count) return { ok: true, allocations };
                 continue;

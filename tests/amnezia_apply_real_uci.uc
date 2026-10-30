@@ -21,8 +21,13 @@ function runner(args) {
     return { ok: true, output: '' };
 }
 let opts = { config_dir: dir, lock_dir: dir + '/apply-lock', runner,
+    mark_audit: function() { return {ok:true}; },
     runtime_runner: function(args) { return { ok: true, output: '[]' }; },
     now: function() { return ticks; }, pause: function(n) { ticks += n; } };
+let blocked_opts = { ...opts, mark_audit:function() { return {ok:false,error:'IP rule mark conflict'}; } };
+expect(!apply.apply(fixture, 'afawg_block', '16908', '1112', 1000, blocked_opts).ok, 'mark conflict accepted');
+let blocked_check = uci.cursor(dir, dir + '/delta2', '');
+expect(blocked_check.load('network') != null && blocked_check.get('network','afawg_block') == null, 'mark conflict wrote UCI');
 let first = apply.apply(fixture, 'afawg_case', '16900', '1100', 1000, opts);
 expect(first.ok, 'Apply failed: ' + first.error);
 let check = uci.cursor(dir, dir + '/delta2', '');
@@ -77,4 +82,19 @@ let replaced = apply.with_lock(opts, function(session) {
 });
 expect(!replaced.ok && fs.stat(opts.lock_dir) != null, 'replacement directory was removed');
 fs.rmdir(opts.lock_dir); fs.rmdir(dir + '/old-lock');
+let check_count = 0, changed_opts = { ...opts, lock_dir:dir + '/changed-lock' };
+changed_opts.runtime_runner = function(args) {
+    check_count++;
+    if (check_count == 1) {
+        expect(fs.rename(changed_opts.lock_dir, dir + '/changed-old') && fs.mkdir(changed_opts.lock_dir, 0700), 'simulate lock replacement');
+    }
+    return {ok:true,output:'[]'};
+};
+let changed = apply.with_lock(changed_opts, function(session) {
+    return session.apply(fixture, 'afawg_lost', '16906', '1110', 1000);
+});
+expect(!changed.ok, 'lock replacement before staging accepted');
+let check_lost = uci.cursor(dir, dir + '/delta2', '');
+expect(check_lost.load('network') != null && check_lost.get('network','afawg_lost') == null, 'UCI committed after lock loss');
+fs.rmdir(changed_opts.lock_dir); fs.rmdir(dir + '/changed-old');
 print('AWG apply test passed with real isolated UCI and mock netifd\n');

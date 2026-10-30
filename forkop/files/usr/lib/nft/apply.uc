@@ -515,6 +515,10 @@ function nft_add_awg_guards(table, snapshot_dir, revision) {
     if (type(snapshot) != 'object' || snapshot.revision != revision || type(snapshot.entries) != 'array') return false;
     let planned = require('subscription.amnezia_guard_plan').plan(snapshot.entries, [], 0x08000000);
     if (!planned.ok || length(planned.guards) != length(snapshot.entries)) return false;
+    if (length(planned.guards)) {
+        let audit = require('subscription.amnezia_mark_audit').audit(map(planned.guards, g => g.mark));
+        if (type(audit) != 'object' || audit.ok !== true) return false;
+    }
     for (let i = 0; i < length(planned.guards); i++) {
         let guard = planned.guards[i];
         if (snapshot.entries[i].mark != guard.mark) return false;
@@ -535,6 +539,10 @@ function nft_add_awg_union_guards(table, old_dir, old_revision, new_dir, new_rev
     if (a == null || b == null || a.revision != old_revision || b.revision != new_revision) return false;
     let union = require('subscription.amnezia_guard_union').plan(a.entries, b.entries, []);
     if (!union.ok) return false;
+    if (length(union.guards)) {
+        let audit = require('subscription.amnezia_mark_audit').audit(map(union.guards, g => g.mark));
+        if (type(audit) != 'object' || audit.ok !== true) return false;
+    }
     for (let guard in union.guards)
         if (!nft_insert_rule(table, 'mangle_output', ['meta', 'mark', '==', sprintf('0x%08x', guard.mark),
             'oifname', '!=', '"' + guard.name + '"', 'counter', 'drop'])) return false;

@@ -45,6 +45,10 @@ function apply_internal(text, name, table, priority, timeout_ms, opts, lease) {
             return { ok: false, error: 'Pending network changes detected; apply or discard them first' };
         let available = runtime_check.check(table, priority, opts.runtime_runner);
         if (!available.ok) return available;
+        let mark_audit = type(opts.mark_audit) == 'function' ? opts.mark_audit : require('subscription.amnezia_mark_audit').audit;
+        let mark_result = mark_audit([0x18000000 | int(table)]);
+        if (type(mark_result) != 'object' || mark_result.ok !== true) return {ok:false,error:'AWG mark audit failed'};
+        if (borrowed && !valid_lease(lease)) return {ok:false,error:'AWG lock lost before staging'};
         if (!fs.chmod(lock_dir, 448) || !fs.mkdir(delta))
             return { ok: false, error: 'Could not create private UCI workspace' };
         created_delta = true;
@@ -62,6 +66,9 @@ function apply_internal(text, name, table, priority, timeout_ms, opts, lease) {
         }
         let addresses = cursor.get('network', name, 'addresses');
         let peer = cursor.get('network', name + '_peer', 'public_key');
+        if (borrowed && !valid_lease(lease)) return {ok:false,error:'AWG lock lost before commit'};
+        mark_result = mark_audit([0x18000000 | int(table)]);
+        if (type(mark_result) != 'object' || mark_result.ok !== true) return {ok:false,error:'AWG mark audit failed before commit'};
         if (!importer.commit_staged(cursor).ok)
             return { ok: false, error: 'Commit uncertain; inspect network configuration' };
         committed = true;
@@ -69,12 +76,14 @@ function apply_internal(text, name, table, priority, timeout_ms, opts, lease) {
             return { ok: false, error: 'Pending network changes appeared; inspect owned configuration' };
         available = runtime_check.check(table, priority, opts.runtime_runner);
         if (!available.ok) return { ok: false, error: 'Kernel routing changed; inspect owned configuration' };
+        if (borrowed && !valid_lease(lease)) return {ok:false,error:'AWG lock lost after commit; inspect network'};
         let started = activation.start(name, addresses, timeout_ms, opts.runner, opts.pause, opts.now);
         if (started.ok) {
             let verified = handshake.verify(name, peer, timeout_ms, opts.handshake_runner || opts.runner,
                 opts.pause, opts.now, opts.wall);
             if (verified.ok) return { ok: true, name, table, priority };
         }
+        if (borrowed && !valid_lease(lease)) return {ok:false,error:'AWG lock lost; inspect network'};
         if (!activation.stop(name, opts.runner).ok)
             return { ok: false, error: 'Activation failed; could not stop interface; inspect network configuration' };
         let check = uci.cursor(config_dir, delta, '');
@@ -86,8 +95,10 @@ function apply_internal(text, name, table, priority, timeout_ms, opts, lease) {
         for (let n in names)
             if (check.delete('network', n) == null)
                 return { ok: false, error: 'Activation failed; rollback could not be staged' };
+        if (borrowed && !valid_lease(lease)) return {ok:false,error:'AWG lock lost before rollback; inspect network'};
         if (!check.commit('network'))
             return { ok: false, error: 'Activation failed; rollback commit uncertain' };
+        if (borrowed && !valid_lease(lease)) return {ok:false,error:'AWG lock lost before reload; inspect network'};
         if (!activation.reload(opts.runner).ok)
             return { ok: false, error: 'Configuration removed but network reload failed' };
         return { ok: false, error: 'Activation failed; owned configuration removed' };
@@ -98,7 +109,7 @@ function apply_internal(text, name, table, priority, timeout_ms, opts, lease) {
     }
     let result = process();
     // UCI delta can contain key material; remove only our fixed path.
-    if (created_delta) { fs.unlink(delta + '/network'); fs.rmdir(delta); }
+    if (created_delta && (!borrowed || valid_lease(lease))) { fs.unlink(delta + '/network'); fs.rmdir(delta); }
     if (!borrowed) fs.rmdir(lock_dir);
     return result;
 }
@@ -132,6 +143,7 @@ function cleanup_internal(text, name, table, priority, opts, lease) {
             let c = uci.cursor(config_dir, delta, '');
             if (!c || c.load('network') == null || !verifier.verify_uci(c, parsed, name, table, priority, ipv4, ipv6).ok)
                 return {ok:false,error:'Owned configuration differs; cleanup refused'};
+            if (borrowed && !valid_lease(lease)) return {ok:false,error:'AWG lock lost before stop'};
             if (!activation.stop(name, opts.runner).ok)
                 return {ok:false,error:'Could not stop interface; cleanup refused'};
             c = uci.cursor(config_dir, delta, '');
@@ -141,15 +153,17 @@ function cleanup_internal(text, name, table, priority, opts, lease) {
             for (let e in plan.entries) push(names, e.name);
             for (let n in names) if (c.delete('network', n) == null)
                 return {ok:false,error:'Could not stage cleanup'};
+            if (borrowed && !valid_lease(lease)) return {ok:false,error:'AWG lock lost before cleanup commit'};
             if (!c.commit('network')) return {ok:false,error:'Cleanup commit uncertain; inspect network'};
             if (config_dir == '/etc/config' && fs.stat('/tmp/.uci/network') != null)
                 return {ok:false,error:'Pending network changes appeared; reload refused'};
+            if (borrowed && !valid_lease(lease)) return {ok:false,error:'AWG lock lost before reload; inspect network'};
             if (!activation.reload(opts.runner).ok) return {ok:false,error:'Cleanup committed but network reload failed'};
             return {ok:true};
         } catch (e) { return {ok:false,error:'Cleanup failed; inspect network'}; }
     }
     let result = process();
-    if (created_delta) { fs.unlink(delta + '/network'); fs.rmdir(delta); }
+    if (created_delta && (!borrowed || valid_lease(lease))) { fs.unlink(delta + '/network'); fs.rmdir(delta); }
     if (!borrowed) fs.rmdir(lock_dir);
     return result;
 }

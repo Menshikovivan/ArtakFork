@@ -84,6 +84,7 @@ expect(index(fs.readfile(snapshot_dir + '/snapshot.json'), key) < 0, 'snapshot l
 expect(snapshot.save(snapshot_dir, [snapshot_entry, snapshot_entry]) == null, 'duplicate snapshot entry accepted');
 expect(snapshot.load(snapshot_dir).revision == saved_snapshot.revision, 'invalid snapshot overwrote previous');
 let build_opts = {
+    audit: function() { return {ok:true}; },
     current_generation: function() { return revision; },
     restore_generation: function() { return { generation:revision, revision, identity:id,
         entries:[{ index: 1, name: 'afawg_a1', table: '10001', priority: '1000' }] }; }
@@ -91,6 +92,9 @@ let build_opts = {
 let built = snapshot.build(snapshot_dir, dir, active_dir, [{ source: 'rule_2', identity: id }], null, 1000, [], build_opts);
 expect(built != null && built.entries[0].mark == snapshot_entry.mark, 'verified entries not assembled into snapshot');
 expect(snapshot.build(snapshot_dir, dir, active_dir, [{ source: 'rule_2', identity: id }], null, 1000, [snapshot_entry.mark], build_opts) == null, 'occupied mark accepted');
+build_opts.audit = function() { return {ok:false,error:'IP rule mark conflict'}; };
+expect(snapshot.build(snapshot_dir, dir, active_dir, [{ source: 'rule_2', identity: id }], null, 1000, [], build_opts) == null, 'mark audit failure accepted');
+build_opts.audit = function() { return {ok:true}; };
 let new_generation = 'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd';
 build_opts.inspect_generation = function() { return { generation:new_generation, revision, identity:id,
     entries:[{index:1,name:'afawg_a1',table:'10001',priority:'1000'}] }; };
