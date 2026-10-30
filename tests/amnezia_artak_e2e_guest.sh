@@ -53,6 +53,7 @@ printf '[Interface]\nPrivateKey = %s\nAddress = 10.88.1.1/32\nListenPort = 29001
 ucode -e 'let f=require("fs");let c=f.readfile("/tmp/e2e.conf");if(f.writefile("/tmp/e2e-request",sprintf("%J",{config:c,section:"e2etest"}))==null)exit(1);'
 
 echo 'E2E stage: invoke actual rpcd import'
+ucode -L /usr/lib/forkop -e 'let f=require("fs");print(sprintf("feature=%J runtime_dir=%J reload_lock=%J subscription_lock=%J forkop_pending=%J network_pending=%J\n",require("subscription.amnezia_feature").enabled(), f.stat("/var/run/forkop")?.type, f.stat("/var/run/forkop.reload.lock")?.type, f.stat("/var/run/forkop/subscription-update.lock")?.type, f.stat("/tmp/.uci/forkop")?.type, f.stat("/tmp/.uci/network")?.type));'
 ubus call luci.artak_awg import_conf "$(cat /tmp/e2e-request)" >/tmp/e2e-result
 test "$(jsonfilter -i /tmp/e2e-result -e '@.ok')" = true
 count=0
