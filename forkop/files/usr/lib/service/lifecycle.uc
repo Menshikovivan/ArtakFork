@@ -150,6 +150,7 @@ let subscription_runtime_no_refresh = getenv("FORKOP_SUBSCRIPTION_RUNTIME_NO_REF
 let subscription_deferred_sections = "";
 let nft_populate_enabled = NFT_POPULATE_ENABLED_DEFAULT;
 let nft_candidate_batch_file = "";
+let nft_recovery_create_only = false;
 let list_change_rollback_dir = "";
 let rule_condition_cache_enabled = 0;
 let startup_config_fingerprint = "";
@@ -323,6 +324,7 @@ function lifecycle_env() {
         FORKOP_PENDING_RELOAD_FILE: PENDING_RELOAD_FILE,
         FORKOP_RELOAD_LOCK_DIR: RELOAD_LOCK_DIR,
         FORKOP_NFT_BATCH_FILE: nft_candidate_batch_file,
+        FORKOP_NFT_CREATE_ONLY: nft_recovery_create_only ? '1' : '0',
         FORKOP_NFT_CANDIDATE_FAIL_PHASE: getenv("FORKOP_NFT_CANDIDATE_FAIL_PHASE") || "",
         FORKOP_SINGBOX_CONFIG_FAIL_PHASE: getenv("FORKOP_SINGBOX_CONFIG_FAIL_PHASE") || "",
         // Test-only bounded readiness fault injection is forwarded to the
@@ -819,6 +821,12 @@ function awg_nft_union_factory(ctx, lease, holds) {
         lease_active:function() { return lease.valid() === true; },
         begin:function() { return nft_candidate_batch_file == '' && nft_candidate_begin(); },
         rebuild_base:function() { return nft_rebuild_runtime(union_args) == 0; },
+        rebuild_recovery:function() {
+            nft_recovery_create_only = true;
+            let status = nft_rebuild_runtime(union_args);
+            nft_recovery_create_only = false;
+            return status == 0;
+        },
         // nft_rebuild_runtime appended the union while constructing the table.
         install_guards:function() { return true; },
         apply_lists:function() {
@@ -830,6 +838,20 @@ function awg_nft_union_factory(ctx, lease, holds) {
         validate:function() { return nft_candidate_validate(); },
         commit:function() { return nft_candidate_finish(true, true); },
         abort:function() { return nft_candidate_finish(false); },
+        table_absent:function() {
+            // Empty/error output is not proof that the table is absent.
+            let value;
+            try { value = json(command_output_from_args(['nft','-j','list','tables'])); }
+            catch (e) { return false; }
+            if (type(value) != 'object' || type(value.nftables) != 'array') return false;
+            for (let item in value.nftables) {
+                if (type(item) != 'object') return false;
+                if (item.metainfo != null) continue;
+                if (type(item.table) != 'object' || type(item.table.family) != 'string' || type(item.table.name) != 'string') return false;
+                if (item.table.family == 'inet' && item.table.name == NFT_TABLE_NAME) return false;
+            }
+            return true;
+        },
         verify_union:function() {
             let checked = checker.verify(ctx.journal_dir, ctx.generation_dir, ctx.source,
                 ctx.old_snapshot_dir, ctx.new_snapshot_dir, {});
@@ -1033,7 +1055,9 @@ function awg_singbox_swap_bridge(ctx, lease, holds, check_guard, check_generatio
             if (verify('new')) return true;
             let expected = trim(fs.readfile(stage_hash) || '');
             if (!safe() || !match(expected, /^[0-9a-f]{64}$/) || live_hash() != expected ||
-                !cache_transaction.verify(dir, SECTION_CACHE_DIR, 'new')) return false;
+                !cache_transaction.recover_new(dir, SECTION_CACHE_DIR, function(path) {
+                    return module_success(SINGBOX_UC, ['publish-section-cache', path]);
+                }) || !safe()) return false;
             let timeout = as_string(getenv('FORKOP_SING_BOX_RELOAD_PID_TIMEOUT') || '15');
             if (module_status(STATE_UC, ['stop-managed-sing-box-runtime', timeout]) != 0 || !safe() ||
                 !module_success(SINGBOX_UC, ['validate-config-stage', config_get(CONFIG_NAME + '.settings.config_path', '')]) ||
@@ -1133,6 +1157,13 @@ function awg_production_swap_factory(source, identity, old_id, new_id, dirs, lea
         snapshot_revisions:function() { return pair; },
         install_union:function() { return nft != null && nft.install_union(); },
         verify_union:function() { return nft != null && nft.verify_union(); },
+        verify_guard:function() { return recovering === true && guard_ok(); },
+        recover_guard:function() {
+            if (recovering !== true || nft == null || holds() !== true || !lease.valid()) return false;
+            if (guard_ok()) return true;
+            let j = journal.read(dirs.journal, source);
+            return j != null && nft.recover_union(j.phase) && guard_ok();
+        },
         reload:function() { return bridge != null && bridge.reload(); },
         verify_new:function() { return bridge != null && (bridge.verify_new() || (recovering === true && bridge.resume_new())); },
         restore_old:function() { return bridge != null && bridge.restore_old(); },
@@ -1207,11 +1238,64 @@ function start_phase_failed(phase, status) {
     return status;
 }
 
-// Until production recovery operations are available, never start a new
+// Reconcile an interrupted swap under the same lock order as the updater.
+// If any durable input, firewall, route or cache proof is missing, leave the
+// journal intact and let the startup barrier refuse the transition.
+function awg_try_recover_swaps() {
+    let dirs = {journal:'/etc/forkop/awg-swap-journal',generation:'/etc/forkop/awg-generations',
+        candidate:'/etc/forkop/awg-subscription-candidates',good:'/etc/forkop/awg-last-good',active:'/etc/forkop/awg-active'};
+    let planner = require('subscription.amnezia_reboot_plan');
+    let gen = require('subscription.amnezia_generation');
+    let journal = require('subscription.amnezia_swap_journal');
+    let checker = require('subscription.amnezia_lifecycle_swap');
+    let result = require('subscription.amnezia_orchestrator').recover_all(function(source,lease,holds) {
+        let plan = planner.plan(dirs.journal,dirs.generation,'/etc/forkop/awg-swap-snapshots',source,{});
+        if (plan == null || holds() !== true || !lease.valid()) return null;
+        let old = gen.read_generation(dirs.generation,source,plan.old_generation);
+        let next = gen.read_generation(dirs.generation,source,plan.new_generation);
+        if (old == null || next == null || old.identity != next.identity ||
+            !checker.current_rule(source,old.identity,dirs)) return null;
+        let ops = awg_production_swap_factory(source,old.identity,plan.old_generation,plan.new_generation,dirs,lease,holds,true);
+        if (ops == null) return null;
+        let saved = sprintf('%J',journal.read(dirs.journal,source));
+        let pointer = gen.current_id(dirs.generation,source);
+        let ok = require('subscription.amnezia_recovery_bootstrap').prepare(plan, {
+            holds,
+            unchanged:function() { return saved == sprintf('%J',journal.read(dirs.journal,source)) &&
+                gen.current_id(dirs.generation,source) == pointer && checker.current_rule(source,old.identity,dirs); },
+            guard_ok:function() { return ops.verify_guard(); },
+            stop:function() { return module_status(STATE_UC,['stop-managed-sing-box-runtime',
+                as_string(getenv('FORKOP_SING_BOX_RELOAD_PID_TIMEOUT') || '15')]) == 0; },
+            audit:function(guards) {
+                let marks = []; for (let item in guards) push(marks,item.mark);
+                let checked = require('subscription.amnezia_mark_audit').audit(marks);
+                return type(checked) == 'object' && checked.ok === true;
+            },
+            record_rollback:function() { return journal.mark_rollback(dirs.journal,source,plan.old_generation,plan.new_generation); },
+            restore_pointer:function() {
+                let current = gen.current_id(dirs.generation,source);
+                return current == plan.old_generation || (current == plan.new_generation &&
+                    gen.switch_to(dirs.generation,source,plan.new_generation,plan.old_generation));
+            },
+            install_guard:function() { return ops.recover_guard(); },
+        });
+        return ok ? ops : null;
+    },dirs.journal,dirs.generation,{lib:LIB_DIR,reload_lock:RELOAD_LOCK_DIR,subscription_lock:SUBSCRIPTION_UPDATE_LOCK_DIR});
+    return type(result) == 'object' && result.ok === true;
+}
+
+// Until recovery succeeds, never start a new
 // runtime over an unresolved swap. This check only inspects journal state and
 // deliberately does not delete interfaces, rules, or a prior working runtime.
 function awg_swap_start_barrier() {
     if (!require('subscription.amnezia_feature').enabled()) return true;
+    let pending_dir = getenv('FORKOP_AWG_SWAP_JOURNAL_DIR') || '/etc/forkop/awg-swap-journal';
+    let pending = fs.lsdir(pending_dir), has_swap = false;
+    if (type(pending) == 'array') for (let name in pending) if (match(name, /\.swap\.json$/)) has_swap = true;
+    // The real recovery coordinator acquires reload -> subscription -> AWG
+    // itself; never recurse when this lifecycle already holds a lock.
+    if (has_swap && !start_subscription_update_lock_held && !awg_network_lock_held &&
+        pending_dir == '/etc/forkop/awg-swap-journal') awg_try_recover_swaps();
     let had_subscription_lock = start_subscription_update_lock_held;
     let had_awg_lock = awg_network_lock_held;
     if (!had_subscription_lock && !acquire_start_subscription_update_lock()) return false;

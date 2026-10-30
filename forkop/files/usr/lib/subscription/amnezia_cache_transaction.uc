@@ -58,8 +58,21 @@ function restore(dir, live, publish) {
     if (publish(dir + '/cache-replay') !== true) return false;
     return same(old, entries(live, true));
 }
+// A reboot removes the runtime cache. Recreate only a missing directory from
+// the captured new generation; never overwrite a present, unexpected cache.
+function recover_new(dir, live, publish) {
+    if (type(publish) != 'function' || fs.readfile(dir + '/cache-ready') != '1\n') return false;
+    let next = entries(dir + '/cache-new', false);
+    if (next == null) return false;
+    if (fs.lstat(live) != null) return same(entries(live, false), next);
+    let replay = dir + '/cache-new-replay.section-cache';
+    if (fs.lstat(replay) != null) {
+        if (!same(entries(replay, false), next)) return false;
+    } else if (!write_copy(replay, next)) return false;
+    return publish(dir + '/cache-new-replay') === true && same(next, entries(live, false));
+}
 function verify(dir, live, which) {
     if ((which != 'old' && which != 'new') || fs.readfile(dir + '/cache-ready') != '1\n') return false;
     return same(entries(dir + '/cache-' + which, false), entries(live, true));
 }
-return { capture, restore, verify };
+return { capture, restore, verify, recover_new };

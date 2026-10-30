@@ -80,6 +80,15 @@ function execute(factory, journal_dir, generation_dir, source, old_id, new_id, o
 function recover(factory, journal_dir, generation_dir, source, opts) {
     return guarded(factory, opts, function(ops) { return swap.recover(ops, journal_dir, generation_dir, source); });
 }
+function recover_all(factory, journal_dir, generation_dir, opts) {
+    if (type(factory) != 'function') return {ok:false,error:'Recovery operations unavailable'};
+    return guarded(function(lease, holds) { return {lease, holds}; }, opts, function(ctx) {
+        return require('subscription.amnezia_swap_recovery').recover_all(journal_dir, generation_dir, {
+            holds_locks:ctx.holds,
+            ops_for_source:function(source) { return factory(source, ctx.lease, ctx.holds); }
+        });
+    });
+}
 
 // Start an update from a candidate while preserving the old current pointer.
 // The prepare and swap journals share journal_dir so startup recovery sees
@@ -125,4 +134,4 @@ function prepare_and_execute(factory, dirs, source, old_id, identity, metadata, 
         return swap.execute_journaled(checked, dirs.journal, dirs.generation, source, old_id, staged.generation);
     });
 }
-return { execute, recover, prepare_and_execute };
+return { execute, recover, recover_all, prepare_and_execute };

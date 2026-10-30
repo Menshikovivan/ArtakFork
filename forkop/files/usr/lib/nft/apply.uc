@@ -13,6 +13,7 @@ const CONFIG_NAME = getenv("FORKOP_CONFIG_NAME") || "forkop";
 const DNS_SOURCE_SET = "forkop_dns_sources";
 const DNS_SOURCE6_SET = "forkop_dns_sources6";
 const NFT_BATCH_FILE = getenv("FORKOP_NFT_BATCH_FILE") || "";
+const NFT_CREATE_ONLY = getenv("FORKOP_NFT_CREATE_ONLY") == "1";
 // Test-only candidate failure injection. Empty in production.
 const NFT_CANDIDATE_FAIL_PHASE = getenv("FORKOP_NFT_CANDIDATE_FAIL_PHASE") || "";
 const NFT_TRANSITION_GUARD_CHAIN = "forkop_transition_guard";
@@ -112,7 +113,7 @@ function run_args(args) {
     // nft -f submits a complete file as one netlink transaction. Candidate
     // preparation records mutations instead of exposing partial live state.
     if (NFT_BATCH_FILE != "" && length(args) > 2 && args[0] == "nft" &&
-        (args[1] == "add" || args[1] == "insert" || args[1] == "delete" || args[1] == "flush")) {
+        (args[1] == "add" || args[1] == "create" || args[1] == "insert" || args[1] == "delete" || args[1] == "flush")) {
         if (NFT_CANDIDATE_FAIL_PHASE == "prepare")
             return false;
         let words = [];
@@ -436,7 +437,8 @@ function csv_to_lines_file(csv, path) {
 }
 
 function nft_create_table(name) {
-    return run_args([ "nft", "add", "table", "inet", name ]);
+    if (NFT_CREATE_ONLY && NFT_BATCH_FILE == "") return false;
+    return run_args([ "nft", NFT_CREATE_ONLY ? "create" : "add", "table", "inet", name ]);
 }
 
 function nft_create_set(table, name, definition) {
@@ -1459,6 +1461,9 @@ function tproxy_route_rule_present(table, mark) {
 }
 
 function ensure_tproxy_route_rule(table, mark, rt_tables_path) {
+    // Recovery candidate preparation must not mutate routing outside the nft
+    // transaction. Missing routes require separate verified provisioning.
+    if (NFT_CREATE_ONLY) return tproxy_route_rule_present(table, mark);
     rt_tables_path = as_string(rt_tables_path || "/etc/iproute2/rt_tables");
 
     if (!ensure_rt_table_entry(rt_tables_path, "105", table)) {
@@ -1736,7 +1741,7 @@ function nft_remove_transition_guard(table, mark) {
 function nft_rebuild_runtime_from_uci(rt_table, table, localv4_set, common_set, port_set, ip_port_set, interface_set, fakeip_mark, outbound_mark, fakeip_range, tproxy_port, zapret_bin, zapret_route_mark_base, zapret_queue_base, zapret_desync_mark, zapret_desync_mark_postnat, zapret2_bin, zapret2_route_mark_base, zapret2_queue_base, zapret2_desync_mark, zapret2_desync_mark_postnat, localv6_set, common6_set, ip_port6_set, fakeip6_range, tproxy6_address) {
     log_debug("Applying nftables runtime rules");
 
-    if (nft_table_present(table) && !nft_delete_table(table))
+    if (!NFT_CREATE_ONLY && nft_table_present(table) && !nft_delete_table(table))
         return false;
 
     return nft_create_full_runtime_from_uci(rt_table, table, localv4_set, common_set, port_set, ip_port_set, interface_set, fakeip_mark, outbound_mark, fakeip_range, tproxy_port, zapret_bin, zapret_route_mark_base, zapret_queue_base, zapret_desync_mark, zapret_desync_mark_postnat, zapret2_bin, zapret2_route_mark_base, zapret2_queue_base, zapret2_desync_mark, zapret2_desync_mark_postnat, localv6_set, common6_set, ip_port6_set, fakeip6_range, tproxy6_address);

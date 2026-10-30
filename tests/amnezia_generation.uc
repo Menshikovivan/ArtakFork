@@ -124,4 +124,13 @@ expect(swap.recover(ops, jdir6, gen, 'source').ok && journal.read(jdir6, 'source
     'retired finalizer recovery failed');
 let jdir5 = base + '/journal5';
 expect(fs.mkdir(jdir5) && journal.write(jdir5, 'source', first_id, second_id, 'prepared'), 'permissions journal fixture');
+let jdir7 = base + '/journal7';
+expect(fs.mkdir(jdir7), 'all-recovery fixture');
+locks.with_awg = function(o, cb) { return cb({valid:function() { return true; }}); };
+let called_factory = false;
+let recovery_factory = function() { called_factory = true; return ops; };
+expect(orchestrator.recover_all(recovery_factory, jdir7, gen, {locks}).ok && !called_factory, 'empty recovery failed');
+expect(fs.writefile(jdir7 + '/source.prepare.json', '{}') != null &&
+    !orchestrator.recover_all(recovery_factory, jdir7, gen, {locks}).ok && !called_factory,
+    'uncertain prepare journal did not block recovery');
 print('AWG atomic generation and crash journal checks passed\n');

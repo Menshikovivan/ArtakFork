@@ -28,7 +28,7 @@ function module_status(mod,args) {
 function module_success(mod,args) {
  if (args[0] == 'commit-config-stage') { commits++; fs.writefile(SECTION_CACHE_DIR+'/item.json','new-meta'); return fs.writefile(args[2],fs.readfile(root+'/live.json')) != null && fs.writefile(root+'/live.json',fs.readfile(args[1])) != null; }
  if (args[0] == 'restore-config-stage') return fs.writefile(root+'/live.json',fs.readfile(args[1])) != null;
- if (args[0] == 'publish-section-cache') return fs.writefile(SECTION_CACHE_DIR+'/item.json',fs.readfile(args[1]+'.section-cache/item.json')) != null;
+ if (args[0] == 'publish-section-cache') { if (fs.stat(SECTION_CACHE_DIR) == null && !fs.mkdir(SECTION_CACHE_DIR,0700)) return false; return fs.writefile(SECTION_CACHE_DIR+'/item.json',fs.readfile(args[1]+'.section-cache/item.json')) != null; }
  return true;
 }
 function expect(v,m) { if (!v) die('FAIL: ' + m + '\\n'); }
@@ -40,7 +40,13 @@ let h='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 let f=awg_singbox_swap_bridge({source:'src',old_generation:h},{valid:function(){return true;}},function(){return true;},function(){return true;},function(){return true;});
 expect(f != null && f.reload() && f.verify_new(), 'new generation staged and verified');
 expect(fs.readfile(root+'/live.json') == 'new', 'new config live');
+generation++;
+expect(!f.verify_new() && f.resume_new() && f.verify_new(), 'restart recovers new config with fresh process provenance');
+fs.unlink(SECTION_CACHE_DIR+'/item.json'); fs.rmdir(SECTION_CACHE_DIR);
+generation++;
+expect(f.resume_new() && f.verify_new() && fs.readfile(SECTION_CACHE_DIR+'/item.json') == 'new-meta', 'reboot reconstructs missing section cache from durable backup');
 fs.writefile(SECTION_CACHE_DIR+'/item.json','external-change');
+expect(!f.resume_new(), 'restart refuses unexpected section cache');
 expect(!f.restore_old() && fs.readfile(SECTION_CACHE_DIR+'/item.json') == 'external-change', 'refuses to overwrite unexpected cache');
 fs.writefile(SECTION_CACHE_DIR+'/item.json','new-meta');
 let recovered=awg_singbox_swap_bridge({source:'src',old_generation:h},{valid:function(){return true;}},function(){return true;},function(){return true;},function(){return true;});
