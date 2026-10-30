@@ -47,6 +47,11 @@ function prepare(parsed, name) {
     if (iface == null || peer == null || !iface.private_key || type(iface.addresses) != 'array' ||
         !peer.public_key || type(peer.allowed_ips) != 'array' || !peer.endpoint_host || !peer.endpoint_port)
         return { ok: false, error: 'Invalid interface or peer fields' };
+    // A managed client must initiate its first handshake even when the source
+    // does not specify keepalive. Respect explicit zero/off and other values.
+    // This is persistent UCI state, so no temporary kernel change survives a
+    // killed worker without a corresponding committed configuration.
+    if (peer.persistent_keepalive == null) peer.persistent_keepalive = '25';
     // Network policy remains under Forkop control, regardless of imported data.
     iface.proto = 'amneziawg';
     iface.defaultroute = '0';

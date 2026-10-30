@@ -15,6 +15,13 @@ let from_conf = netifd.prepare(parser.parse_conf(fixture), 'afawg_conf');
 expect(from_conf.ok && from_conf.iface.awg_disable_cookies == '1' && from_conf.peer.endpoint_port == '8443',
     'Parser and netifd adapter do not agree');
 expect(prepared.ok, 'Expected valid prepared interface');
+expect(prepared.peer.persistent_keepalive == '25' && from_conf.peer.persistent_keepalive == '25',
+    'Missing keepalive must default to 25 seconds');
+let off = netifd.prepare(parser.parse_conf(fixture + 'PersistentKeepalive = off\n'), 'afawg_off');
+let zero = netifd.prepare(parser.parse_conf(fixture + 'PersistentKeepalive = 0\n'), 'afawg_zero');
+let custom = netifd.prepare(parser.parse_conf(fixture + 'PersistentKeepalive = 17\n'), 'afawg_custom');
+expect(off.ok && off.peer.persistent_keepalive == '0' && zero.ok && zero.peer.persistent_keepalive == '0' &&
+    custom.ok && custom.peer.persistent_keepalive == '17', 'Explicit keepalive must be preserved');
 expect(prepared.iface.proto == 'amneziawg' && prepared.iface.defaultroute == '0' &&
     prepared.iface.peerdns == '0' && prepared.iface.dns == null, 'Default routing or DNS changed');
 expect(prepared.peer.route_allowed_ips == '0' && prepared.peer_type == 'amneziawg_afawg_a1',

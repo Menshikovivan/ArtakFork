@@ -116,7 +116,9 @@ function parse_conf(text) {
         // never silently broaden it to all IPv4 and IPv6 traffic.
         peer.allowed_ips = peer.allowed_ips == null ? null : list_ip(peer.allowed_ips);
         if (peer.allowed_ips == null) return failure("Invalid allowed IPs");
-        if (peer.persistent_keepalive == "off") delete peer.persistent_keepalive;
+        // Preserve an explicit opt-out so the managed-interface default can
+        // distinguish it from a missing setting.
+        if (peer.persistent_keepalive == "off") peer.persistent_keepalive = "0";
         if (peer.persistent_keepalive != null && !numbers(peer.persistent_keepalive, 65535, true)) return failure("Invalid keepalive");
         if (peer.endpoint == null) return failure("Peer endpoint is required");
         let endpoint = match(peer.endpoint, /^\[([0-9A-Fa-f:.]+)\]:([0-9]+)$/) || match(peer.endpoint, /^([A-Za-z0-9._-]+):([0-9]+)$/);

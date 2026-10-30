@@ -1,4 +1,4 @@
-// Extract 3x-ui raw vpn:// profiles. The caller must validate each returned
+// Extract 3x-ui vpn:// and plain WireGuard share links. The caller must validate each returned
 // configuration before use; this module never writes or logs credentials.
 function decode64(value) {
     if (type(value) != "string" || value == "" || length(value) > 1398104 ||
@@ -26,6 +26,12 @@ function extract(data) {
     }
     for (let line in split(replace(data, /\r/g, ""), "\n")) {
         line = replace(line, /^[ \t]+|[ \t]+$/g, "");
+        if (substr(line, 0, 12) == 'wireguard://' || substr(line, 0, 5) == 'wg://') {
+            let wg = require('subscription.wireguard_uri').parse(line);
+            if (!wg.ok) result.invalid++;
+            else push(result.configs, wg.config);
+            continue;
+        }
         if (substr(line, 0, 6) != "vpn://") continue;
         let config = decode64(substr(line, 6));
         if (config == null || length(config) > 65536 ||
@@ -62,7 +68,7 @@ function only_awg(data) {
     for (let line in split(replace(data, /\r/g, ''), '\n')) {
         line = trim(line);
         if (line == '') continue;
-        if (substr(line, 0, 6) != 'vpn://') return false;
+        if (substr(line, 0, 6) != 'vpn://' && substr(line, 0, 12) != 'wireguard://' && substr(line, 0, 5) != 'wg://') return false;
         seen = true;
     }
     return seen && validated(data).ok;

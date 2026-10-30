@@ -18,7 +18,7 @@ jobs:
         run: |
           set -euo pipefail
           version=$(sed -n 's/^VERSION=//p' artak-install.sh)
-          test "$version" = 2.4.3-canary.10
+          test "$version" = 2.4.3-canary.11
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           sudo apt-get update
           sudo apt-get install -y build-essential busybox-static curl fakeroot file gawk git patch perl tar unzip util-linux xz-utils zstd

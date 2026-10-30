@@ -14,7 +14,7 @@ echo 'E2E stage: verify temporary package uplink'
 ip route get 10.0.2.2
 ping -c 1 -W 2 10.0.2.2 >/dev/null || { echo 'VM package gateway unreachable' >&2; nft list ruleset; exit 1; }
 for package in forkop luci-app-forkop; do
-    wget -O "/tmp/$package.apk" "$ARTAK_MIRROR/artak/${package}_2.4.3-canary.10.apk" || { echo "VM package download failed: $package" >&2; nft list ruleset; exit 1; }
+    wget -O "/tmp/$package.apk" "$ARTAK_MIRROR/artak/${package}_2.4.3-canary.11.apk" || { echo "VM package download failed: $package" >&2; nft list ruleset; exit 1; }
 done
 apk --allow-untrusted --simulate add /tmp/forkop.apk /tmp/luci-app-forkop.apk >/dev/null
 apk --allow-untrusted add /tmp/forkop.apk /tmp/luci-app-forkop.apk >/dev/null
@@ -41,7 +41,7 @@ awg pubkey </tmp/e2e-client.key >/tmp/e2e-client.pub
 awg genkey >/tmp/e2e-peer.key
 awg pubkey </tmp/e2e-peer.key >/tmp/e2e-peer.pub
 ip link add e2epeer type amneziawg
-awg set e2epeer private-key /tmp/e2e-peer.key listen-port 29002 peer "$(cat /tmp/e2e-client.pub)" allowed-ips 10.88.1.1/32 endpoint 127.0.0.1:29001 persistent-keepalive 2
+awg set e2epeer private-key /tmp/e2e-peer.key listen-port 29002 peer "$(cat /tmp/e2e-client.pub)" allowed-ips 10.88.1.1/32 endpoint 127.0.0.1:29001
 ip netns add artak-e2e
 ip link set e2epeer netns artak-e2e
 ip -n artak-e2e link set lo up
@@ -61,7 +61,7 @@ for config in forkop network; do
         # Preserve the file to exercise production handling of empty deltas.
     fi
 done
-printf '[Interface]\nPrivateKey = %s\nAddress = 10.88.1.1/32\nListenPort = 29001\n[Peer]\nPublicKey = %s\nEndpoint = 127.0.0.1:29002\nAllowedIPs = 0.0.0.0/0\nPersistentKeepalive = 2\n' "$(cat /tmp/e2e-client.key)" "$(cat /tmp/e2e-peer.pub)" >/tmp/e2e.conf
+printf '[Interface]\nPrivateKey = %s\nAddress = 10.88.1.1/32\nListenPort = 29001\n[Peer]\nPublicKey = %s\nEndpoint = 127.0.0.1:29002\nAllowedIPs = 0.0.0.0/0\n' "$(cat /tmp/e2e-client.key)" "$(cat /tmp/e2e-peer.pub)" >/tmp/e2e.conf
 ucode -e 'let f=require("fs");let c=f.readfile("/tmp/e2e.conf");if(f.writefile("/tmp/e2e-request",sprintf("%J",{config:c,section:"e2etest"}))==null)exit(1);'
 
 echo 'E2E stage: invoke actual rpcd import'
@@ -100,6 +100,7 @@ if [ "$state" != done ]; then
 fi
 iface=$(jsonfilter -i /tmp/e2e-status -e '@.name')
 case "$iface" in afawg_*) ;; *) echo 'invalid interface name' >&2; exit 1;; esac
+test "$(uci -q get "network.${iface}_peer.persistent_keepalive")" = 25 || { echo 'default keepalive was not set' >&2; exit 1; }
 echo "E2E stage: import done, interface $iface"
 awg show "$iface" latest-handshakes | awk 'NR==1 && $2>0 {ok=1} END {exit !ok}' || { echo 'missing handshake after import' >&2; exit 1; }
 # This synthetic same-host peer is not a normal Internet destination. Install

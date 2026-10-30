@@ -1,7 +1,7 @@
 #!/bin/sh
 # Bootstrap or upgrade ArtakFork on the supported OpenWrt APK platform.
 set -eu
-VERSION=2.4.3-canary.10
+VERSION=2.4.3-canary.11
 BASE_VERSION=1.0.5
 ENGINE_VERSION=1.14.3-extended-2.7.3
 ENGINE_FILE=sing-box-extended_1.14.3-extended-2.7.3_openwrt_aarch64_cortex-a53.apk
