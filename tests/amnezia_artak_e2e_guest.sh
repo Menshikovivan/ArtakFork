@@ -5,6 +5,9 @@ umask 077
 [ "${ARTAK_DISPOSABLE_VM:-}" = 1 ] && [ -n "${ARTAK_MIRROR:-}" ] || exit 1
 echo 'E2E stage: install built packages'
 /etc/init.d/firewall stop
+# The stock VM firewall can leave a rejecting base chain after stop/reload;
+# only this disposable image uses its LAN as the package-download uplink.
+nft flush ruleset
 for package in forkop luci-app-forkop; do
     wget -q -O "/tmp/$package.apk" "$ARTAK_MIRROR/artak/${package}_2.4.3-canary.7.apk"
 done
