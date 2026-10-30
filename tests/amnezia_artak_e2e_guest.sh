@@ -98,6 +98,9 @@ iface=$(jsonfilter -i /tmp/e2e-status -e '@.name')
 case "$iface" in afawg_*) ;; *) echo 'invalid interface name' >&2; exit 1;; esac
 echo "E2E stage: import done, interface $iface"
 awg show "$iface" latest-handshakes | awk 'NR==1 && $2>0 {ok=1} END {exit !ok}' || { echo 'missing handshake after import' >&2; exit 1; }
+# This synthetic same-host peer is not a normal Internet destination. Install
+# only its /32 return path so the guest can reply to the namespace probe.
+ip route add 10.88.1.2/32 dev "$iface"
 ip netns exec artak-e2e ping -c 3 -W 3 10.88.1.1 || { echo 'peer-to-imported interface ping failed' >&2; ip -n artak-e2e route show; ip link show "$iface"; exit 1; }
 
 echo 'E2E stage: apply Forkop lifecycle and verify guard/config'
