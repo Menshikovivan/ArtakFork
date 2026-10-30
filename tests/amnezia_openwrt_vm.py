@@ -35,8 +35,9 @@ def main():
         def upload(local_name, guest_name):
             encoded = base64.b64encode((ROOT / 'tests' / local_name).read_bytes()).decode('ascii')
             command(vm, ': > /tmp/artak-guest.b64')
-            for pos in range(0, len(encoded), 600):
-                command(vm, "printf '%s' '" + encoded[pos:pos + 600] + "' >> /tmp/artak-guest.b64")
+            # BusyBox ash/serial line editing truncates long interactive lines.
+            for pos in range(0, len(encoded), 128):
+                command(vm, "printf '%s' '" + encoded[pos:pos + 128] + "' >> /tmp/artak-guest.b64")
             command(vm, 'base64 -d /tmp/artak-guest.b64 > ' + guest_name)
         upload('amnezia_openwrt_guest.sh', '/tmp/artak-guest.sh')
         upload('openwrt_fw4_guard.sh', '/tmp/artak-fw4.sh')
