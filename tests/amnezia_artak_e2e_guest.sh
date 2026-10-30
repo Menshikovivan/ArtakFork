@@ -67,7 +67,7 @@ ucode -e '
 let f=require("fs"), p="/usr/lib/forkop/subscription/amnezia_manual_activate.uc", s=f.readfile(p);
 let needle="            return type(u) == ";
 if (type(s)!="string" || index(s,needle)<0) exit(1);
-let injected="            require(\"fs\").writefile(\"/tmp/e2e-verify\", sprintf(\"uci=%J live=%J uci_error=%J live_error=%J\",u?.ok,live?.ok,u?.error,live?.error));" + "\n";
+let injected="            let rr=require(\"subscription.amnezia_activate\").run; let dump={}; for (let fam in [\"-4\",\"-6\"]) { dump[fam+\"-rules\"]=rr([\"ip\",\"-j\",\"-N\",fam,\"rule\",\"show\"]); dump[fam+\"-routes\"]=rr([\"ip\",\"-j\",\"-N\",fam,\"route\",\"show\",\"table\",entry.table]); } require(\"fs\").writefile(\"/tmp/e2e-verify\", sprintf(\"uci=%J live=%J uci_error=%J live_error=%J table=%J priority=%J kernel=%J\",u?.ok,live?.ok,u?.error,live?.error,entry.table,entry.priority,dump));" + "\n";
 if (f.writefile(p,replace(s,needle,injected+needle))==null) exit(1);
 '
 ucode -L /usr/lib/forkop -e 'let f=require("fs");print(sprintf("feature=%J runtime_dir=%J reload_lock=%J subscription_lock=%J forkop_pending=%J network_pending=%J\n",require("subscription.amnezia_feature").enabled(), f.stat("/var/run/forkop")?.type, f.stat("/var/run/forkop.reload.lock")?.type, f.stat("/var/run/forkop/subscription-update.lock")?.type, f.stat("/tmp/.uci/forkop")?.type, f.stat("/tmp/.uci/network")?.type));'
