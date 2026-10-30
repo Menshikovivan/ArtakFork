@@ -51,7 +51,11 @@ fi
 echo 'VM stage: restarting netifd'
 if ! /etc/init.d/network restart; then echo 'VM stage: network restart returned failure' >&2; exit 1; fi
 echo 'VM stage: netifd restarted'
-ubus call network get_proto_handlers | grep -q '"amneziawg"' || { echo 'AWG protocol handler not registered' >&2; exit 1; }
+n=0
+until ubus call network get_proto_handlers 2>/dev/null | grep -q '"amneziawg"'; do
+    n=$((n+1)); [ "$n" -lt 90 ] || { echo 'AWG protocol handler not registered after restart' >&2; exit 1; }
+    sleep 1
+done
 
 run_profile() {
     profile=$1
