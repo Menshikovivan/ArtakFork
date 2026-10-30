@@ -1211,6 +1211,17 @@ function stop_main(allow_process_conflict) {
     if (process_conflict)
         log_message("Additional sing-box process detected; explicit Stop will terminate all sing-box runtimes", "warn");
 
+    // Keep the AWG firewall guard until every relevant sing-box process has
+    // actually stopped. A failed stop must leave the live dataplane intact.
+    let sing_box_status = module_status(STATE_UC, [
+        allow_process_conflict ? "stop-all-sing-box-runtime" : "stop-managed-sing-box-runtime",
+        getenv("FORKOP_SING_BOX_RELOAD_PID_TIMEOUT") || "15"
+    ]);
+    if (sing_box_status != 0) {
+        log_message("Could not stop sing-box; preserving the firewall guard and runtime", "fatal");
+        return sing_box_status;
+    }
+
     remove_file(WATCHDOG_READY_FILE);
     log_message("Stopping Forkop", "info");
     module_success(DNS_FAILOVER_UC, [ "stop-runtime" ]);
@@ -1241,13 +1252,6 @@ function stop_main(allow_process_conflict) {
     if (module_success(NFT_UC, [ "tproxy-route6-present", RT_TABLE_NAME ]))
         command_success_from_args([ "ip", "-6", "route", "flush", "table", RT_TABLE_NAME ]);
 
-    let sing_box_status = module_status(STATE_UC, [
-        allow_process_conflict ? "stop-all-sing-box-runtime" : "stop-managed-sing-box-runtime",
-        getenv("FORKOP_SING_BOX_RELOAD_PID_TIMEOUT") || "15"
-    ]);
-    if (sing_box_status != 0)
-        status = sing_box_status;
-
     return status;
 }
 
@@ -1257,8 +1261,10 @@ function cleanup_failed_runtime() {
     log_message("Cleaning up Forkop runtime after failed start/reload", "info");
 
     let stop_status = stop_main();
-    if (stop_status != 0)
-        status = stop_status;
+    if (stop_status != 0) {
+        log_message("Runtime was not stopped; retaining firewall guard and state", "fatal");
+        return stop_status;
+    }
 
     let dns_status = dnsmasq_restore_fail_safe();
     if (dns_status != 0 && status == 0)
