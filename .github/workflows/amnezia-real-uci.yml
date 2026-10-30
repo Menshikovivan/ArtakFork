@@ -1,0 +1,73 @@
+name: AmneziaWG real UCI integration
+
+on:
+  push:
+    paths:
+      - 'forkop/files/usr/lib/subscription/amnezia_*.uc'
+      - 'tests/amnezia_import_real_uci*'
+      - '.github/workflows/amnezia-real-uci.yml'
+  pull_request:
+    paths:
+      - 'forkop/files/usr/lib/subscription/amnezia_*.uc'
+      - 'tests/amnezia_import_real_uci*'
+      - '.github/workflows/amnezia-real-uci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  real-uci:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      LIBUBOX_COMMIT: da2d205a5cf3e877c45a2eec488218cbaf452e7d
+      UCI_COMMIT: 74f6277aabffc943d026f406df57c22595134c42
+      UCODE_COMMIT: 4a28662538275b67a0bcf11de25c365c1ec7a99d
+    steps:
+      - uses: actions/checkout@v5.0.0
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake pkg-config libjson-c-dev
+      - name: Build pinned OpenWrt libraries and ucode modules
+        shell: bash
+        run: |
+          set -euo pipefail
+          prefix="$RUNNER_TEMP/awg-deps"
+          fetch() {
+            git clone "$1" "$RUNNER_TEMP/$2-src"
+            git -C "$RUNNER_TEMP/$2-src" checkout --detach "$3"
+            test "$(git -C "$RUNNER_TEMP/$2-src" rev-parse HEAD)" = "$3"
+          }
+          fetch https://github.com/openwrt/libubox.git libubox "$LIBUBOX_COMMIT"
+          fetch https://github.com/openwrt/uci.git uci "$UCI_COMMIT"
+          fetch https://github.com/ucode-lang/ucode.git ucode "$UCODE_COMMIT"
+          cmake -S "$RUNNER_TEMP/libubox-src" -B "$RUNNER_TEMP/libubox-build" \
+            -DCMAKE_INSTALL_PREFIX="$prefix" -DBUILD_LUA=OFF -DBUILD_EXAMPLES=OFF
+          cmake --build "$RUNNER_TEMP/libubox-build" --parallel 2
+          cmake --install "$RUNNER_TEMP/libubox-build"
+          cmake -S "$RUNNER_TEMP/uci-src" -B "$RUNNER_TEMP/uci-build" \
+            -DCMAKE_INSTALL_PREFIX="$prefix" -DCMAKE_PREFIX_PATH="$prefix" -DBUILD_LUA=OFF
+          cmake --build "$RUNNER_TEMP/uci-build" --parallel 2
+          cmake --install "$RUNNER_TEMP/uci-build"
+          export LD_LIBRARY_PATH="$prefix/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          cmake -S "$RUNNER_TEMP/ucode-src" -B "$RUNNER_TEMP/ucode-build" \
+            -DCMAKE_PREFIX_PATH="$prefix" -DUCI_SUPPORT=ON -DFS_SUPPORT=ON \
+            -DDIGEST_SUPPORT=OFF -DFFI_SUPPORT=OFF
+          cmake --build "$RUNNER_TEMP/ucode-build" --target ucode fs_lib uci_lib --parallel 2
+      - name: Test isolated UCI import
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH="$RUNNER_TEMP/awg-deps/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          export FORKOP_TEST_UCODE_BINARY="$RUNNER_TEMP/ucode-build/ucode"
+          export FORKOP_TEST_UCODE_MODULES="$RUNNER_TEMP/ucode-build"
+          mkdir -p "$RUNNER_TEMP/awg-test-bin"
+          cat > "$RUNNER_TEMP/awg-test-bin/ucode" <<'EOF'
+          #!/bin/sh
+          exec "$FORKOP_TEST_UCODE_BINARY" -L "$FORKOP_TEST_UCODE_MODULES/*.so" "$@"
+          EOF
+          chmod +x "$RUNNER_TEMP/awg-test-bin/ucode"
+          export PATH="$RUNNER_TEMP/awg-test-bin:$PATH"
+          bash tests/amnezia_import_real_uci.sh

@@ -3,6 +3,7 @@ let fs = require('fs');
 let store = require('subscription.amnezia_store');
 let subscription = require('subscription.amnezia_subscription');
 let main_parser = require('subscription.parser');
+let candidates = require('subscription.amnezia_candidates');
 function expect(v, message) { if (!v) die('FAIL: ' + message + '\n'); }
 let dir = ARGV[0];
 let id = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
@@ -25,6 +26,29 @@ let old = fs.readfile(dir + '/rule_1.awg.json');
 expect(type(old) == 'string' && length(old) > 0, 'record missing');
 expect(length(store.load(dir, 'rule_1', id)) == 1, 'record did not load');
 expect(store.load(dir, 'rule_1', other) == null, 'mismatched source identity loaded');
+let allocation = [{ name: 'afawg_a1', table: '10001', priority: '1000' }];
+let plan = candidates.prepare(dir, 'rule_1', id, allocation);
+expect(plan.ok && length(plan.plans) == 1, 'candidate did not prepare for AWG runtime');
+expect(plan.plans[0].network.iface.private_key == key && plan.plans[0].network.peer.route_allowed_ips == '0', 'candidate lost key or route policy');
+expect(plan.plans[0].routing.entries[0].options.table == '10001', 'candidate lost table');
+expect(!candidates.prepare(dir, 'rule_1', other, allocation).ok, 'wrong identity planned');
+expect(!candidates.prepare(dir, 'rule_1', id, []).ok, 'missing allocation accepted');
+expect(store.save(dir, 'rule_2', id, vpn + '\n' + vpn), 'two-profile candidate write failed');
+let two = [
+    { name: 'afawg_a1', table: '10001', priority: '1000' },
+    { name: 'afawg_a2', table: '10002', priority: '1002' }
+];
+expect(candidates.prepare(dir, 'rule_2', id, two).ok, 'two distinct allocations rejected');
+two[1].priority = '1001';
+expect(!candidates.prepare(dir, 'rule_2', id, two).ok, 'overlapping priorities accepted');
+two[1].priority = '1002'; two[1].table = '10001';
+expect(!candidates.prepare(dir, 'rule_2', id, two).ok, 'duplicate table accepted');
+two[1].table = '10002'; two[1].name = 'afawg_a1';
+let duplicate_name = candidates.prepare(dir, 'rule_2', id, two);
+expect(!duplicate_name.ok, 'duplicate interface accepted');
+expect(index(sprintf('%J', duplicate_name), key) < 0, 'failure returned private key');
+two[1].name = 'wan';
+expect(!candidates.prepare(dir, 'rule_2', id, two).ok, 'unmanaged interface name accepted');
 expect(!store.save(dir, 'rule_1', id, vpn + '\n' + badvpn), 'unsafe feed saved');
 expect(!store.save(dir, 'rule_1', id, 'vpn://malformed!'), 'malformed feed saved');
 expect(!store.save(dir, '../outside', id, mixed), 'invalid path accepted');
