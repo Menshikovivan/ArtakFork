@@ -24,6 +24,8 @@ jobs:
       LIBUBOX_COMMIT: da2d205a5cf3e877c45a2eec488218cbaf452e7d
       UCI_COMMIT: 74f6277aabffc943d026f406df57c22595134c42
       UCODE_COMMIT: 4a28662538275b67a0bcf11de25c365c1ec7a99d
+      UBUS_COMMIT: 469d7852316ef692805396d8af744ec43604b842
+      RPCD_COMMIT: db20eff5535fe3126c05dc0edc029caf0e82fe10
     steps:
       - uses: actions/checkout@v5.0.0
       - name: Install build dependencies
@@ -43,6 +45,8 @@ jobs:
           fetch https://github.com/openwrt/libubox.git libubox "$LIBUBOX_COMMIT"
           fetch https://github.com/openwrt/uci.git uci "$UCI_COMMIT"
           fetch https://github.com/ucode-lang/ucode.git ucode "$UCODE_COMMIT"
+          fetch https://github.com/openwrt/ubus.git ubus "$UBUS_COMMIT"
+          fetch https://github.com/openwrt/rpcd.git rpcd "$RPCD_COMMIT"
           cmake -S "$RUNNER_TEMP/libubox-src" -B "$RUNNER_TEMP/libubox-build" \
             -DCMAKE_INSTALL_PREFIX="$prefix" -DBUILD_LUA=OFF -DBUILD_EXAMPLES=OFF
           cmake --build "$RUNNER_TEMP/libubox-build" --parallel 2
@@ -52,6 +56,15 @@ jobs:
           cmake --build "$RUNNER_TEMP/uci-build" --parallel 2
           cmake --install "$RUNNER_TEMP/uci-build"
           export LD_LIBRARY_PATH="$prefix/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          cmake -S "$RUNNER_TEMP/ubus-src" -B "$RUNNER_TEMP/ubus-build" \
+            -DCMAKE_INSTALL_PREFIX="$prefix" -DCMAKE_PREFIX_PATH="$prefix" -DBUILD_LUA=OFF -DBUILD_EXAMPLES=OFF
+          cmake --build "$RUNNER_TEMP/ubus-build" --parallel 2
+          cmake --install "$RUNNER_TEMP/ubus-build"
+          cmake -S "$RUNNER_TEMP/rpcd-src" -B "$RUNNER_TEMP/rpcd-build" \
+            -DCMAKE_INSTALL_PREFIX="$prefix" -DCMAKE_PREFIX_PATH="$prefix" \
+            -DIWINFO_SUPPORT=OFF -DRPCSYS_SUPPORT=OFF -DFILE_SUPPORT=OFF -DUCODE_SUPPORT=OFF
+          cmake --build "$RUNNER_TEMP/rpcd-build" --parallel 2
+          cmake --install "$RUNNER_TEMP/rpcd-build"
           cmake -S "$RUNNER_TEMP/ucode-src" -B "$RUNNER_TEMP/ucode-build" \
             -DCMAKE_PREFIX_PATH="$prefix" -DUCI_SUPPORT=ON -DFS_SUPPORT=ON \
             -DDIGEST_SUPPORT=OFF -DFFI_SUPPORT=OFF
@@ -71,3 +84,12 @@ jobs:
           chmod +x "$RUNNER_TEMP/awg-test-bin/ucode"
           export PATH="$RUNNER_TEMP/awg-test-bin:$PATH"
           bash tests/amnezia_import_real_uci.sh
+      - name: Exercise executable plugin with real rpcd and ubus
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH="$RUNNER_TEMP/awg-deps/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          export ARTAK_TEST_PREFIX="$RUNNER_TEMP/awg-deps"
+          export ARTAK_TEST_UCODE="$RUNNER_TEMP/ucode-build/ucode"
+          export ARTAK_TEST_UCODE_MODULES="$RUNNER_TEMP/ucode-build"
+          bash tests/amnezia_real_rpcd.sh
