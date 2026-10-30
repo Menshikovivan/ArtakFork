@@ -2,6 +2,7 @@
 "require form";
 "require baseclass";
 "require fs";
+"require rpc";
 "require network";
 "require ui";
 "require uci";
@@ -10,6 +11,47 @@
 "require view.forkop.whatsapp as whatsapp";
 
 const UCI_PACKAGE = main.FORKOP_UCI_PACKAGE;
+const awgPreflightRpc = rpc.declare({
+  object: "luci.artak_awg",
+  method: "preflight",
+  params: ["config"],
+});
+
+function showAmneziaPreflight() {
+  const limit = 262144;
+  const input = E("input", { type: "file", accept: ".conf,text/plain" });
+  const status = E("p", { role: "status" }, "Выберите файл .conf для проверки.");
+  const check = E("button", { type: "button", class: "btn cbi-button cbi-button-action", disabled: true }, "Проверить файл");
+  input.addEventListener("change", () => {
+    const file = input.files && input.files[0];
+    check.disabled = !file || file.size > limit;
+    status.textContent = file && file.size > limit ? "Файл слишком большой: максимум 256 КиБ." : "Файл готов к проверке.";
+  });
+  check.addEventListener("click", async () => {
+    const file = input.files && input.files[0];
+    if (!file || file.size > limit) return;
+    check.disabled = true;
+    status.textContent = "Проверка…";
+    try {
+      const text = await file.text();
+      const result = await awgPreflightRpc(text);
+      status.textContent = result && result.ok ?
+        "Формат конфигурации прошёл проверку. Подключение не создано." :
+        "Не удалось проверить файл: конфигурация неверна или содержит неподдерживаемые параметры.";
+    } catch (_error) {
+      status.textContent = "Проверка недоступна. Подключение не создано.";
+    } finally {
+      input.value = "";
+      check.disabled = true;
+    }
+  });
+  ui.showModal("Проверка AmneziaWG .conf", [
+    E("p", {}, "Черновая проверка формата 2.0 и 3.1. Она не импортирует файл, не создаёт интерфейс и не проверяет подключение."),
+    E("p", {}, "Файл содержит приватный ключ и отправляется на роутер. Для защиты передачи используйте LuCI по HTTPS."),
+    input, status, check,
+    E("button", { type: "button", class: "btn", click: () => ui.hideModal() }, "Закрыть"),
+  ]);
+}
 const ACTION_PROVIDERS_AVAILABILITY_EVENT =
   main.FORKOP_ACTION_PROVIDERS_AVAILABILITY_EVENT ||
   "forkop:action-providers-availability";
@@ -7149,6 +7191,13 @@ function createSectionContent(section) {
   };
   o.onListChange = refreshDashboardFilterChoiceWidgets;
   outboundNameSourceOptions.set("interfaces", o);
+
+  o = section.taboption("settings", form.Button, "_amnezia_preflight", "AmneziaWG .conf", "Проверка формата файла; импорт и подключение пока недоступны.");
+  o.depends("action", "connection");
+  o.modalonly = true;
+  o.inputtitle = "Проверить .conf";
+  o.inputstyle = "action";
+  o.onclick = showAmneziaPreflight;
 
   o = section.taboption(
     "settings",

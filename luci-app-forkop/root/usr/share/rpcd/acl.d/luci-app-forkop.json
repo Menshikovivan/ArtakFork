@@ -63,6 +63,11 @@
       ]
     },
     "write": {
+      "ubus": {
+        "luci.artak_awg": [
+          "preflight"
+        ]
+      },
       "file": {
         "/var/run/forkop/ui-state/*": [
           "write"

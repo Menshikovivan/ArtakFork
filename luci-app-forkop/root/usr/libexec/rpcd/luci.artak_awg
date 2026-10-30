@@ -1,0 +1,3 @@
+#!/bin/sh
+# rpcd sends request data on stdin. Arguments contain only the RPC method.
+exec ucode -L /usr/lib/forkop /usr/lib/forkop/subscription/amnezia_preflight_rpc.uc "$@"
