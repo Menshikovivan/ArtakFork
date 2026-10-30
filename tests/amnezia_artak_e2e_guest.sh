@@ -115,6 +115,10 @@ while [ ! -s /etc/sing-box/config.json ]; do
     count=$((count+1)); [ "$count" -lt 60 ] || { echo 'Forkop config not generated after restart' >&2; logread | grep -E 'forkop|sing-box' | tail -50 | sed -E 's/[A-Za-z0-9+\/]{42,43}=/[REDACTED]/g' || :; exit 1; }
     sleep 1
 done
-ucode -e 'let f=require("fs");let c=json(f.readfile("/etc/sing-box/config.json"));let n=ARGV[0];if(!filter(c.outbounds||[],x=>x.bind_interface==n && x.routing_mark!=null)[0])exit(1);' "$iface" || { echo 'generated config lacks AWG outbound or mark' >&2; exit 1; }
+count=0
+until ucode -e 'let f=require("fs");try{let c=json(f.readfile("/etc/sing-box/config.json"));let n=ARGV[0];if(filter(c.outbounds||[],x=>x.bind_interface==n && x.routing_mark!=null)[0])exit(0);}catch(e){} exit(1);' "$iface"; do
+    count=$((count+1)); [ "$count" -lt 60 ] || { echo 'generated config lacks AWG outbound or mark' >&2; logread | grep -E 'forkop|sing-box' | tail -60 | sed -E 's/[A-Za-z0-9+\/]{42,43}=/[REDACTED]/g' || :; exit 1; }
+    sleep 1
+done
 nft list table inet ForkopTable | grep -Fq "$iface" || { echo 'nft guard does not mention AWG interface' >&2; exit 1; }
 echo ARTAK_E2E_PASSED
