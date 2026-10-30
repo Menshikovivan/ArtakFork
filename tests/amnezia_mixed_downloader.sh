@@ -121,11 +121,14 @@ forkop.other.action=connection
 forkop.other.subscription_urls=https://example.invalid/sub
 STATE
 stage=legacy-rename
+sed -i 's/#first/#second/' "$TEST_FEED"
 if TEST_FAIL_RENAME=1 ucode -L "$FORKOP_LIB" "$FORKOP_LIB/subscription/cache.uc" update-source other 1 https://example.invalid/sub runtime; then
  echo 'failed legacy rename was accepted' >&2; exit 1
 fi
 test -s "$WORK/generation/other-subscription-1.current" || { echo 'new generation pointer missing' >&2; exit 1; }
-test ! -e "$WORK/singbox/subscriptions/other-subscription-1.json" || { echo 'unexpected mutable JSON after rename failure' >&2; exit 1; }
+# The downloader may restore matching last-known-good content for this URL
+# before downloading. Its bytes must stay old if the new rename fails.
+cmp "$WORK/legacy-before" "$WORK/singbox/subscriptions/other-subscription-1.json" || { echo 'new legacy JSON appeared after rename failure' >&2; exit 1; }
 cmp "$WORK/pointer-before" "$WORK/generation/test-subscription-1.current" || { echo 'old pointer changed after rename failure' >&2; exit 1; }
 cmp "$WORK/legacy-before" "$WORK/singbox/subscriptions/test-subscription-1.json" || { echo 'old JSON changed after rename failure' >&2; exit 1; }
 echo 'mixed downloader: initial, invalid, source change and legacy rename failure passed'
