@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 INSTALLER = Path(__file__).resolve().parents[2] / 'artak-install.sh'
@@ -28,7 +29,7 @@ class InstallerRuntime(unittest.TestCase):
         (self.root / 'dev/null').touch()
         shutil.copyfile(busybox, self.root / 'bin/busybox')
         (self.root / 'bin/busybox').chmod(0o755)
-        for name in ['sh', 'id', 'sha256sum', 'mktemp', 'awk', 'rm', 'mkdir', 'chmod', 'date', 'cp']:
+        for name in ['sh', 'id', 'sha256sum', 'mktemp', 'awk', 'rm', 'mkdir', 'rmdir', 'chmod', 'date', 'cp', 'cat', 'grep']:
             (self.root / 'bin' / name).symlink_to('busybox')
         shutil.copyfile(INSTALLER, self.root / 'installer.sh')
         self.release('25.12.6')
@@ -47,6 +48,14 @@ for file in "$@"; do [ -f "$file" ] || exit 91; done
         self.script('etc/init.d/sing-box', 'echo "engine:$1" >> /events\n')
         self.script('bin/sysupgrade', '[ "$1" = -b ]\necho backup >> /events\necho mock-backup > "$2"\n')
         self.script('etc/init.d/forkop', 'echo "forkop:$1" >> /events\n')
+        self.script('bin/ubus', '''[ "$1" = call ] && [ "$2" = network ] && [ "$3" = get_proto_handlers ] || exit 1
+if [ -e /awg-no-handler ]; then echo '{}'; else echo '{"amneziawg":{}}'; fi
+''')
+        self.script('bin/sleep', 'exit 0\n')
+        self.script('etc/init.d/network', '''echo "network:$1" >> /events
+[ ! -e /network-fail ] || exit 1
+[ -e /network-preserve ] || rm -f /awg-no-handler
+''')
         self.script('bin/wget', '''[ "$1" = -O ]
 case "$3" in
 https://github.com/Menshikovivan/ArtakFork/releases/download/2.4.3-canary.7/*) ;;
@@ -114,6 +123,46 @@ cp "/fixtures/${3##*/}" "$2"
         self.assertEqual(len(backups), 1)
         self.assertGreater(backups[0].stat().st_size, 0)
         self.assertEqual(backups[0].stat().st_mode & 0o777, 0o600)
+
+    def test_missing_awg_handler_schedules_network_then_forkop(self):
+        (self.root / 'awg-no-handler').touch()
+        result = self.run_installer()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('SSH and Wi-Fi may disconnect', result.stdout)
+        log = self.root / 'tmp/artak-awg-netifd-restart.log'
+        for _ in range(100):
+            if log.exists() and 'AWG handler is available' in log.read_text(): break
+            time.sleep(.05)
+        events = self.events()
+        self.assertIn('network:restart', events)
+        self.assertIn('forkop:restart', events)
+        self.assertLess(events.index('network:restart'), events.index('forkop:restart'))
+        self.assertIn('AWG handler is available', log.read_text())
+
+    def test_failed_network_restart_does_not_start_forkop(self):
+        (self.root / 'awg-no-handler').touch()
+        (self.root / 'network-fail').touch()
+        result = self.run_installer()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for _ in range(100):
+            p = self.root / 'tmp/artak-awg-netifd-restart.log'
+            if p.exists() and 'network restart failed' in p.read_text(): break
+            time.sleep(.05)
+        self.assertIn('network:restart', self.events())
+        self.assertNotIn('forkop:restart', self.events())
+        self.assertIn('network restart failed', p.read_text())
+
+    def test_handler_timeout_does_not_start_forkop(self):
+        (self.root / 'awg-no-handler').touch()
+        (self.root / 'network-preserve').touch()
+        result = self.run_installer()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        p = self.root / 'tmp/artak-awg-netifd-restart.log'
+        for _ in range(100):
+            if p.exists() and 'handler did not become available' in p.read_text(): break
+            time.sleep(.05)
+        self.assertNotIn('forkop:restart', self.events())
+        self.assertIn('handler did not become available', p.read_text())
 
     def test_existing_matching_engine_skips_base_and_engine(self):
         (self.root / 'has-forkop').touch()

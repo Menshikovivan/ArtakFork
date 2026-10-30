@@ -106,5 +106,52 @@ if [ "$HAS_FORKOP" = 0 ]; then
 fi
 apk add --allow-untrusted \
     "./forkop_${VERSION}.apk" "./luci-app-forkop_${VERSION}.apk" "./luci-i18n-forkop-ru_${VERSION}.apk"
+if [ "$AWG_SUPPORTED" = 1 ]; then
+    command -v ubus >/dev/null 2>&1 || fail 'Cannot inspect netifd protocol handlers: ubus is missing.'
+    command -v grep >/dev/null 2>&1 || fail 'Cannot inspect netifd protocol handlers: grep is missing.'
+    HANDLERS=$(ubus call network get_proto_handlers 2>/dev/null) || fail 'Cannot inspect netifd protocol handlers.'
+    if ! printf '%s\n' "$HANDLERS" | grep -q '"amneziawg"'; then
+        # netifd loads shell protocol handlers at daemon startup, not on its
+        # normal config reload. Run restart in a HUP-immune detached process:
+        # SSH and Wi-Fi can drop before it finishes.
+        AWG_RESTART_LOCK=/tmp/artak-awg-netifd-restart.lock
+        mkdir "$AWG_RESTART_LOCK" 2>/dev/null || fail 'AWG network restart is already pending; inspect /tmp/artak-awg-netifd-restart.log.'
+        AWG_RESTART_JOB=$(mktemp /tmp/artak-awg-netifd-restart.XXXXXX) || { rmdir "$AWG_RESTART_LOCK"; fail 'Could not create AWG restart job.'; }
+        chmod 700 "$AWG_RESTART_JOB"
+        cat > "$AWG_RESTART_JOB" <<'AWG_RESTART_SCRIPT'
+#!/bin/sh
+set -u
+LOCK=/tmp/artak-awg-netifd-restart.lock
+trap 'rmdir "$LOCK" 2>/dev/null || true; rm -f "$0"' EXIT
+echo 'ArtakFork: waiting 5 seconds before restarting network.'
+sleep 5
+if ! /etc/init.d/network restart; then
+    echo 'ArtakFork: network restart failed; Forkop was not started.'
+    exit 1
+fi
+n=0
+while [ "$n" -lt 90 ]; do
+    handlers=$(ubus call network get_proto_handlers 2>/dev/null) || handlers=''
+    if printf '%s\n' "$handlers" | grep -q '"amneziawg"'; then
+        if /etc/init.d/forkop restart; then
+            echo 'ArtakFork: AWG handler is available and Forkop restarted.'
+            exit 0
+        fi
+        echo 'ArtakFork: AWG handler is available but Forkop restart failed.'
+        exit 1
+    fi
+    n=$((n+1))
+    sleep 1
+done
+echo 'ArtakFork: AWG handler did not become available; Forkop was not started.'
+exit 1
+AWG_RESTART_SCRIPT
+        echo 'ArtakFork: AWG requires a network restart. SSH and Wi-Fi may disconnect briefly; the job continues automatically.'
+        echo 'Progress log: /tmp/artak-awg-netifd-restart.log'
+        (trap '' HUP; exec /bin/sh "$AWG_RESTART_JOB") </dev/null >/tmp/artak-awg-netifd-restart.log 2>&1 &
+        echo "ArtakFork $VERSION installed; network restart scheduled. Backup: $BACKUP_PATH"
+        exit 0
+    fi
+fi
 /etc/init.d/forkop restart
 echo "ArtakFork $VERSION installed. Backup: $BACKUP_PATH"
