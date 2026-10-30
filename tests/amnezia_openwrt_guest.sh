@@ -10,9 +10,16 @@ while ! ip link show br-lan >/dev/null 2>&1 ||
 done
 ip addr flush dev br-lan
 udhcpc -n -q -i br-lan >/dev/null
+# Standalone udhcpc is not the netifd DHCP client; a lease message does not
+# guarantee that its helper installed an address, route, or resolver.
+ip addr replace 10.0.2.15/24 dev br-lan
+ip route replace default via 10.0.2.2 dev br-lan
+printf 'nameserver 10.0.2.3\n' > /tmp/resolv.conf
 # The disposable VM uses its LAN as the temporary QEMU user-network uplink.
 # Stock zone policy may reject that egress; the fw4 test later reloads it.
 /etc/init.d/firewall stop
+ip -4 route get 1.1.1.1
+ping -q -c 1 -W 2 10.0.2.2 >/dev/null
 apk update >/dev/null
 apk add ip-full >/dev/null
 base=https://github.com/2Grey/awg-openwrt/releases/download/v25.12.6
