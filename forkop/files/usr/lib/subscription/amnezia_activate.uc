@@ -24,6 +24,11 @@ function contains_address(status, cidr) {
         if (item.address == parts[0] && int(item.mask) == int(parts[1])) return true;
     return false;
 }
+function ready(status, name, addresses) {
+    if (type(status) != 'object' || status.up != true || status.l3_device != name || type(addresses) != 'array' || !length(addresses)) return false;
+    for (let addr in addresses) if (!contains_address(status, addr)) return false;
+    return true;
+}
 function start(name, addresses, timeout_ms, runner, pause, now) {
     if (!valid_name(name) || type(addresses) != 'array' || !length(addresses) ||
         type(timeout_ms) != 'int' || timeout_ms < 1000 || timeout_ms > 30000)
@@ -48,11 +53,7 @@ function start(name, addresses, timeout_ms, runner, pause, now) {
         let reply = runner(['ubus', '-t', '3', 'call', object, 'status', '{}']);
         let status = null;
         if (reply.ok) try { status = json(reply.output); } catch (ignored) {}
-        if (type(status) == 'object' && status.up == true && status.l3_device == name) {
-            let found = true;
-            for (let addr in addresses) if (!contains_address(status, addr)) found = false;
-            if (found) return { ok: true, name };
-        }
+        if (ready(status, name, addresses)) return { ok: true, name };
         if (now() < end) pause(250);
     }
     return { ok: false, error: 'Interface readiness timed out; state is uncertain' };
@@ -63,4 +64,9 @@ function stop(name, runner) {
     return runner(['ubus', '-t', '3', 'call', 'network.interface.' + name, 'down', '{}']).ok ?
         { ok: true } : { ok: false, error: 'Interface stop failed; state is uncertain' };
 }
-return { start, stop };
+function reload(runner) {
+    runner = runner || run;
+    return runner(['ubus', '-t', '3', 'call', 'network', 'reload', '{}']).ok ?
+        { ok: true } : { ok: false, error: 'Network reload failed; state is uncertain' };
+}
+return { start, stop, reload, run, ready };

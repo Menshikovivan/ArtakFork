@@ -1,5 +1,6 @@
 let activation = require('subscription.amnezia_activate');
 function expect(v, m) { if (!v) die(m + '\n'); }
+expect(type(activation.ready) == 'function' && type(activation.run) == 'function', 'Activation module API missing ready or run');
 let log = [], ticks = 0, mode = '';
 function run(args) {
     push(log, args);
