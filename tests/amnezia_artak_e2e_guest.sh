@@ -19,7 +19,11 @@ done
 apk --allow-untrusted --simulate add /tmp/forkop.apk /tmp/luci-app-forkop.apk >/dev/null
 apk --allow-untrusted add /tmp/forkop.apk /tmp/luci-app-forkop.apk >/dev/null
 command -v timeout >/dev/null || { echo 'APK failed to install required timeout dependency' >&2; exit 1; }
-apk add sing-box >/dev/null
+wget -q -O /tmp/sing-box-extended.apk "$ARTAK_MIRROR/extended/sing-box-extended_1.14.3-extended-2.7.3_openwrt_x86_64.apk"
+echo '57189d2d2fcfa108aa82e6e9f06ff7e66f71a67f0f8ab7dca16a7ff58ed7b5b0  /tmp/sing-box-extended.apk' | sha256sum -c
+apk --allow-untrusted --simulate add /tmp/sing-box-extended.apk >/dev/null
+apk --allow-untrusted add /tmp/sing-box-extended.apk >/dev/null
+sing-box version | head -n 1
 /etc/init.d/rpcd restart
 echo 'E2E stage: inspect installed rpcd plugin'
 ls -l /usr/libexec/rpcd/luci.artak_awg || exit 1

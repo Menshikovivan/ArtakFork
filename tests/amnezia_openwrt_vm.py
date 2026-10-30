@@ -24,6 +24,8 @@ class Mirror(http.server.BaseHTTPRequestHandler):
             url = 'https://downloads.openwrt.org' + path[len('/openwrt'):]
         elif re.fullmatch(r'/2grey/[A-Za-z0-9_.-]+\.apk', path):
             url = 'https://github.com/2Grey/awg-openwrt/releases/download/v25.12.6/' + path.rsplit('/', 1)[1]
+        elif path == '/extended/sing-box-extended_1.14.3-extended-2.7.3_openwrt_x86_64.apk':
+            url = 'https://github.com/shtorm-7/sing-box-extended/releases/download/v1.14.3-extended-2.7.3/' + path.rsplit('/', 1)[1]
         elif re.fullmatch(r'/artak/(forkop|luci-app-forkop)_2\.4\.3-canary\.8\.apk', path) and os.getenv('ARTAK_E2E_PACKAGES'):
             package = pathlib.Path(os.environ['ARTAK_E2E_PACKAGES']) / path.rsplit('/', 1)[1]
             try:
