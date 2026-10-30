@@ -24,8 +24,8 @@ jobs:
       LIBUBOX_COMMIT: da2d205a5cf3e877c45a2eec488218cbaf452e7d
       UCI_COMMIT: 74f6277aabffc943d026f406df57c22595134c42
       UCODE_COMMIT: 4a28662538275b67a0bcf11de25c365c1ec7a99d
-      UBUS_COMMIT: 469d7852316ef692805396d8af744ec43604b842
-      RPCD_COMMIT: db20eff5535fe3126c05dc0edc029caf0e82fe10
+      UBUS_COMMIT: db20eff5535fe3126c05dc0edc029caf0e82fe10
+      RPCD_COMMIT: 469d7852316ef692805396d8af744ec43604b842
     steps:
       - uses: actions/checkout@v5.0.0
       - name: Install build dependencies
