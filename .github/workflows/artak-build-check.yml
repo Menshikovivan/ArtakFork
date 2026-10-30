@@ -1,0 +1,100 @@
+name: ArtakFork release build check
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      VERSION: 2.4.3-canary.7
+    steps:
+      - uses: actions/checkout@v5.0.0
+
+      - name: Validate version
+        run: |
+          bash build.sh --check-version "$VERSION"
+          test "$(sed -n 's/^VERSION=//p' artak-install.sh)" = "$VERSION"
+
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          # Match the upstream build environment and exclude the unrelated
+          # Chrome apt source, which can fail independently of this build.
+          for source in /etc/apt/sources.list.d/*; do
+            if [ -f "$source" ] && grep -q 'dl.google.com/linux/chrome' "$source"; then
+              sudo rm -f "$source"
+            fi
+          done
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y build-essential busybox-static curl fakeroot file gawk git patch perl tar unzip util-linux xz-utils zstd
+
+      - name: Check standalone installer
+        run: |
+          node tests/subscription_url_ui.cjs
+          sh -n artak-install.sh
+          sudo python3 -m unittest discover -s scripts/tests -p test_artak_installer.py
+
+      - name: Build six release packages
+        run: bash build.sh "$VERSION" "$PWD/filtered-bin/artak-release"
+
+      - name: Preserve verified compatible pinned upstream releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/prepare_artak_bootstrap.py --use-pinned --output filtered-bin/artak-release
+
+      - name: Mirror verified AmneziaWG packages and source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 -m unittest discover -s scripts/tests -p test_awg_bootstrap.py -v
+          python3 -m unittest discover -s scripts/tests -p test_awg_sources.py -v
+          python3 scripts/prepare_awg_bootstrap.py filtered-bin/artak-release
+          python3 scripts/prepare_awg_sources.py filtered-bin/artak-release
+
+      - name: Prepare installer and package checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_dir="$PWD/filtered-bin/artak-release"
+          cp artak-install.sh "$release_dir/artak-install.sh"
+          cp scripts/install-awg-dependencies.sh "$release_dir/install-awg-dependencies.sh"
+          cd "$release_dir"
+          packages=()
+          for package in forkop luci-app-forkop luci-i18n-forkop-ru; do
+            for format in apk ipk; do
+              file="${package}_${VERSION}.${format}"
+              test -s "$file"
+              packages+=("$file")
+            done
+          done
+          bootstrap=(upstream-*.apk sing-box-extended_*.apk)
+          test "${#bootstrap[@]}" -eq 4
+          awg=(amneziawg-tools_*.apk kmod-amneziawg_*.apk luci-proto-amneziawg_*.apk)
+          test "${#awg[@]}" -eq 3
+          sources=(upstream-forkop-source.tar.gz sing-box-extended-source.tar.gz amneziawg-openwrt-source.tar.gz amneziawg-tools-source.tar.gz amneziawg-kmod-source.tar.gz)
+          for file in "${bootstrap[@]}" "${awg[@]}" "${sources[@]}"; do test -s "$file"; done
+          sha256sum "${packages[@]}" "${bootstrap[@]}" "${awg[@]}" "${sources[@]}" install-awg-dependencies.sh > SHA256SUMS
+          sha256sum -c SHA256SUMS
+
+      - name: Verify release layout and provenance manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd filtered-bin/artak-release
+          test "$(find . -maxdepth 1 -type f -name "*_${VERSION}.apk" | wc -l)" -eq 3
+          test "$(find . -maxdepth 1 -type f -name "*_${VERSION}.ipk" | wc -l)" -eq 3
+          for manifest in bootstrap-sources.json amneziawg-sources.json amneziawg-upstream-sources.json; do
+            test -s "$manifest"
+            python3 -m json.tool "$manifest" > /dev/null
+          done
+          test -s artak-install.sh
+          test -s install-awg-dependencies.sh
+          test -s SHA256SUMS
+          sha256sum -c SHA256SUMS
