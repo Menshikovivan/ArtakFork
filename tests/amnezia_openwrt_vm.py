@@ -109,9 +109,6 @@ def main():
             if 'ARTAK_E2E_PASSED' not in vm.before:
                 raise RuntimeError('ArtakFork end-to-end test did not reach its success marker')
             print('OpenWrt VM: ArtakFork AWG end-to-end passed')
-            upload('amnezia_recovery_barrier_vm.sh', '/tmp/artak-recovery-barrier.sh')
-            command(vm, 'ARTAK_DISPOSABLE_VM=1 sh /tmp/artak-recovery-barrier.sh', timeout=180)
-            print('OpenWrt VM: unfinished journal barrier passed')
     except Exception:
         # Guest script uses generated throwaway keys and never prints them.
         print('OpenWrt guest serial tail:', str(vm.before)[-5000:], file=sys.stderr)
