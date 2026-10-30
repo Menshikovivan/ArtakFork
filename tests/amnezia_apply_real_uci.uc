@@ -8,6 +8,7 @@ let fixture = '[Interface]\nPrivateKey = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 let log = [], ticks = 0, fail_start = false;
 function runner(args) {
     push(log, args);
+    if (args[0] == 'timeout') return { ok: true, output: 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=\t' + time() + '\n' };
     if (args[5] == 'up' && fail_start) return { ok: false };
     if (args[5] == 'status') return { ok: true, output: '{"up":true,"l3_device":"afawg_case","ipv4-address":[{"address":"10.0.0.2","mask":32}]}' };
     return { ok: true, output: '' };

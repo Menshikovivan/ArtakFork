@@ -7,6 +7,7 @@ let importer = require('subscription.amnezia_import');
 let routes = require('subscription.amnezia_routes');
 let activation = require('subscription.amnezia_activate');
 let runtime_check = require('subscription.amnezia_runtime_check');
+let handshake = require('subscription.amnezia_handshake');
 
 function normalized(section) {
     if (type(section) != 'object') return null;
@@ -48,6 +49,7 @@ function apply(text, name, table, priority, timeout_ms, opts) {
             snapshots[n] = value;
         }
         let addresses = cursor.get('network', name, 'addresses');
+        let peer = cursor.get('network', name + '_peer', 'public_key');
         if (!importer.commit_staged(cursor).ok)
             return { ok: false, error: 'Commit uncertain; inspect network configuration' };
         committed = true;
@@ -56,7 +58,11 @@ function apply(text, name, table, priority, timeout_ms, opts) {
         available = runtime_check.check(table, priority, opts.runtime_runner);
         if (!available.ok) return { ok: false, error: 'Kernel routing changed; inspect owned configuration' };
         let started = activation.start(name, addresses, timeout_ms, opts.runner, opts.pause, opts.now);
-        if (started.ok) return { ok: true, name };
+        if (started.ok) {
+            let verified = handshake.verify(name, peer, timeout_ms, opts.handshake_runner || opts.runner,
+                opts.pause, opts.now, opts.wall);
+            if (verified.ok) return { ok: true, name, table, priority };
+        }
         if (!activation.stop(name, opts.runner).ok)
             return { ok: false, error: 'Activation failed; could not stop interface; inspect network configuration' };
         let check = uci.cursor(config_dir, delta, '');
