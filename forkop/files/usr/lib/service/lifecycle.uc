@@ -919,6 +919,27 @@ function start_phase_failed(phase, status) {
     return status;
 }
 
+// Until production recovery operations are available, never start a new
+// runtime over an unresolved swap. This check only inspects journal state and
+// deliberately does not delete interfaces, rules, or a prior working runtime.
+function awg_swap_start_barrier() {
+    if (!require('subscription.amnezia_feature').enabled()) return true;
+    let had_subscription_lock = start_subscription_update_lock_held;
+    let had_awg_lock = awg_network_lock_held;
+    if (!had_subscription_lock && !acquire_start_subscription_update_lock()) return false;
+    if (!had_awg_lock && !acquire_awg_network_lock()) {
+        if (!had_subscription_lock) release_start_subscription_update_lock();
+        return false;
+    }
+    let result = require('subscription.amnezia_swap_recovery').recover_all(
+        getenv('FORKOP_AWG_SWAP_JOURNAL_DIR') || '/etc/forkop/awg-swap-journal',
+        getenv('FORKOP_AWG_GENERATION_DIR') || '/etc/forkop/awg-generations',
+        { holds_locks: function() { return start_subscription_update_lock_held && awg_network_lock_held; } });
+    if (!had_awg_lock) release_awg_network_lock();
+    if (!had_subscription_lock) release_start_subscription_update_lock();
+    return type(result) == 'object' && result.ok === true;
+}
+
 // The reload lock owns this preparation runtime. It is the same procd service
 // as the final runtime, and cannot authorize a second or foreign process.
 function prepare_lists_for_cold_start() {
@@ -978,6 +999,10 @@ function start_main() {
     let status;
 
     log_message("Starting Forkop", "info");
+    if (!awg_swap_start_barrier()) {
+        log_message('AWG swap recovery requires inspection; existing runtime preserved', 'fatal');
+        return 1;
+    }
 
     status = validate_start_config();
     if (status != 0) {
@@ -1334,6 +1359,10 @@ function abort_invalid_staged_config(stage_path) {
 }
 
 function start() {
+    if (!awg_swap_start_barrier()) {
+        log_message('AWG swap recovery requires inspection; existing runtime preserved', 'fatal');
+        return 1;
+    }
     // A current installer/updater may have recorded one exact, procd-owned
     // pre-upgrade process. Wait only for that process to exit; a legacy direct
     // opkg/apk upgrade has no marker and remains fail-closed below.
@@ -1660,6 +1689,10 @@ function reload_reason_for_generation(reason, pending, generation_current) {
 }
 
 function reload(reason) {
+    if (!awg_swap_start_barrier()) {
+        log_message('AWG swap recovery requires inspection; refusing reload', 'fatal');
+        return 1;
+    }
     reason = as_string(reason || "");
     // Retry a completed generation locally only while its source signature
     // matches UCI. Cancelling or replacing a failed edit needs a new generation
@@ -2087,6 +2120,10 @@ function reload_reason_fixture(reason) {
 }
 
 function restart() {
+    if (!awg_swap_start_barrier()) {
+        log_message('AWG swap recovery requires inspection; refusing restart', 'fatal');
+        return 1;
+    }
     if (module_success(UI_UC, [ "package-upgrade-transition-active" ])) {
         log_message("Refusing Forkop restart: package upgrade owns the service transition", "warn");
         return 1;
