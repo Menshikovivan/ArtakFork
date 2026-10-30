@@ -91,6 +91,15 @@ let build_opts = {
 let built = snapshot.build(snapshot_dir, dir, active_dir, [{ source: 'rule_2', identity: id }], null, 1000, [], build_opts);
 expect(built != null && built.entries[0].mark == snapshot_entry.mark, 'verified entries not assembled into snapshot');
 expect(snapshot.build(snapshot_dir, dir, active_dir, [{ source: 'rule_2', identity: id }], null, 1000, [snapshot_entry.mark], build_opts) == null, 'occupied mark accepted');
+let new_generation = 'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd';
+build_opts.inspect_generation = function() { return { generation:new_generation, revision, identity:id,
+    entries:[{index:1,name:'afawg_a1',table:'10001',priority:'1000'}] }; };
+expect(snapshot.build(snapshot_dir, dir, active_dir,
+    [{source:'rule_2', identity:id, generation:new_generation, expected_current:revision}], null, 1000, [], build_opts) != null,
+    'new generation snapshot not prepared');
+expect(snapshot.build(snapshot_dir, dir, active_dir,
+    [{source:'rule_2', identity:id, generation:new_generation, expected_current:other}], null, 1000, [], build_opts) == null,
+    'changed current accepted during snapshot preparation');
 expect(store.save(dir, 'fixture2', identity_a, vpn), 'status candidate save failed');
 let status_revision = store.revision(dir, 'fixture2', identity_a);
 let good_dir = dir + '/status-good';

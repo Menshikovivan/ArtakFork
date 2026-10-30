@@ -140,6 +140,8 @@ jobs:
 
           Attribution and corresponding source: upstream Forkop by ushan0v (https://github.com/ushan0v/forkop, GPL-2.0-or-later); Forkop X by Screamshow (https://github.com/Screamshow/forkop-x, GPL-2.0-or-later); sing-box Extended by shtorm-7 and contributors, based on SagerNet sing-box (https://github.com/shtorm-7/sing-box-extended, GPL-3.0-or-later with the upstream naming condition). Original notices and licenses remain in the attached upstream-forkop-source.tar.gz and sing-box-extended-source.tar.gz archives. The ArtakFork source at this release tag supplies the modified backend and build scripts. No association with upstream authors is implied.
 
+          Experimental AmneziaWG support uses OpenWrt packages by 2Grey and AmneziaWG tools and kernel module by the AmneziaVPN contributors. The associated packaging and upstream source archives, version pins and checksums are attached. See docs/amneziawg-experimental.md for supported configurations and limitations.
+
           Packages are distributed directly through this GitHub release, without a custom mirror. APK files are unsigned; the installer explicitly uses apk --allow-untrusted for these downloaded local packages. No APK signing key is supplied.
           EOF
           assets=(*.apk *.ipk *-source.tar.gz SHA256SUMS artak-install.sh install-awg-dependencies.sh bootstrap-sources.json amneziawg-sources.json amneziawg-upstream-sources.json)

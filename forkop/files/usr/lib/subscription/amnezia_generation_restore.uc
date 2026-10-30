@@ -4,10 +4,9 @@
 let generation = require('subscription.amnezia_generation');
 let store = require('subscription.amnezia_store');
 let verifier = require('subscription.amnezia_verify');
-function restore(dir, good_dir, source, cursor, timeout_ms, opts) {
+function inspect(dir, good_dir, source, current, cursor, timeout_ms, opts) {
     opts = type(opts) == 'object' ? opts : {};
     if (type(opts.matches_source) != 'function') return null;
-    let current = generation.current_id(dir, source);
     if (current == null) return null;
     let record = generation.read_generation(dir, source, current);
     if (record == null) return null;
@@ -35,7 +34,12 @@ function restore(dir, good_dir, source, cursor, timeout_ms, opts) {
             if (type(b) != 'object' || b.ok !== true) return null;
         } catch (e) { return null; }
     }
-    if (generation.current_id(dir, source) != current || store.revision(path, source, record.identity) != record.revision) return null;
+    if (generation.read_generation(dir, source, current) == null || store.revision(path, source, record.identity) != record.revision) return null;
     return { generation:current, revision:record.revision, identity:record.identity, entries:record.entries };
 }
-return { restore };
+function restore(dir, good_dir, source, cursor, timeout_ms, opts) {
+    let current = generation.current_id(dir, source);
+    let result = inspect(dir, good_dir, source, current, cursor, timeout_ms, opts);
+    return result != null && generation.current_id(dir, source) == current ? result : null;
+}
+return { restore, inspect };

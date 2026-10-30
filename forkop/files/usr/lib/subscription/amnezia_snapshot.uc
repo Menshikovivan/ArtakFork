@@ -60,18 +60,23 @@ function build(dir, candidate_dir, active_dir, sources, cursor, timeout_ms, occu
     let generation_dir = opts.generation_dir || getenv('FORKOP_AWG_GENERATION_DIR') || '/etc/forkop/awg-generations';
     let gen = require('subscription.amnezia_generation');
     let restore = type(opts.restore_generation) == 'function' ? opts.restore_generation : require('subscription.amnezia_generation_restore').restore;
+    let inspect = type(opts.inspect_generation) == 'function' ? opts.inspect_generation : require('subscription.amnezia_generation_restore').inspect;
     let current_generation = type(opts.current_generation) == 'function' ? opts.current_generation : gen.current_id;
     let entries = [], seen = {};
     for (let s in sources) {
         if (type(s) != 'object' || type(s.source) != 'string' || seen[s.source]) return null;
         seen[s.source] = true;
-        let restored = restore(generation_dir, candidate_dir, s.source, cursor, timeout_ms, { matches_source: function() { return true; } });
+        let before = current_generation(generation_dir, s.source);
+        if (s.generation != null && (type(s.expected_current) != 'string' || before != s.expected_current)) return null;
+        let restored = s.generation != null
+            ? inspect(generation_dir, candidate_dir, s.source, s.generation, cursor, timeout_ms, { matches_source: function() { return true; } })
+            : restore(generation_dir, candidate_dir, s.source, cursor, timeout_ms, { matches_source: function() { return true; } });
         if (type(restored) != 'object' || restored.identity != s.identity || type(restored.entries) != 'array') return null;
         let revision = restored.revision;
         for (let e in restored.entries)
             push(entries, { index: e.index, name: e.name, table: e.table, priority: e.priority,
                 source: s.source, identity: s.identity, revision });
-        if (current_generation(generation_dir, s.source) != restored.generation) return null;
+        if (current_generation(generation_dir, s.source) != before || (s.generation == null && before != restored.generation)) return null;
     }
     let planned = guard.plan(entries, occupied_marks, 0x08000000);
     if (!planned.ok) return null;

@@ -4,6 +4,8 @@ let ident = require('subscription.amnezia_identity');
 let generation = require('subscription.amnezia_generation');
 let journal = require('subscription.amnezia_swap_journal');
 let swap = require('subscription.amnezia_swap');
+let orchestrator = require('subscription.amnezia_orchestrator');
+let generation_restore = require('subscription.amnezia_generation_restore');
 function expect(v, msg) { if (!v) die('FAIL: ' + msg + '\n'); }
 let base = ARGV[0], candidates = base + '/candidate', good = base + '/good', gen = base + '/generation', jdir = base + '/journal';
 expect(fs.mkdir(candidates) && fs.mkdir(good) && fs.mkdir(gen) && fs.mkdir(jdir), 'fixture directories');
@@ -25,6 +27,10 @@ expect(store.promote(candidates, good, 'source', id, second), 'second promotion'
 record.revision = second; record.entries = [{index:0,name:'afawg_2',table:'15002',priority:'16004'}];
 let second_id = generation.stage(gen, good, record, function() { return true; });
 expect(second_id != null && !generation.switch_to(gen, 'source', null, second_id), 'unexpected pointer overwrite');
+let verify_opts = { matches_source:function() { return true; }, uci_check:function() { return {ok:true}; }, live_check:function() { return {ok:true}; } };
+expect(generation_restore.inspect(gen, good, 'source', second_id, null, 1000, verify_opts).generation == second_id &&
+    generation_restore.restore(gen, good, 'source', null, 1000, verify_opts).generation == first_id,
+    'staged generation inspected by changing current pointer');
 expect(journal.write(jdir, 'source', first_id, second_id, 'prepared'), 'journal prepare');
 expect(journal.recovery(jdir, gen, 'source').action == 'restore', 'prepared crash recovery');
 expect(journal.bind_snapshots(jdir, 'source', first_id, second_id, first_id, second_id), 'snapshot binding');
@@ -56,4 +62,36 @@ ops.reload = function() { return false; };
 let rollback = swap.execute_journaled(ops, jdir3, gen, 'source', second_id, first_id);
 expect(!rollback.ok && !rollback.recovery_required && generation.current_id(gen, 'source') == second_id &&
     journal.read(jdir3, 'source') == null, 'failed switch did not restore old pointer and clear journal');
+let jdir4 = base + '/journal4';
+expect(fs.mkdir(jdir4), 'fourth journal fixture');
+let events = [];
+let locks = {
+    acquire_reload:function() { push(events, 'reload+'); return true; },
+    acquire_subscription:function() { push(events, 'subscription+'); return true; },
+    with_awg:function(o, cb) { push(events, 'awg+'); let r = cb({ marker:'lease' }); push(events, 'awg-'); return r; },
+    release_subscription:function() { push(events, 'subscription-'); return true; },
+    release_reload:function() { push(events, 'reload-'); return true; }
+};
+ops.reload = function() { return true; };
+ops.snapshot_revisions = function() { return {old:second_id, new:first_id}; };
+let orchestrated = orchestrator.execute(function(lease) { expect(lease.marker == 'lease', 'lease missing'); return ops; },
+    jdir4, gen, 'source', second_id, first_id, {locks});
+expect(orchestrated.ok && generation.current_id(gen, 'source') == first_id &&
+    join(',', events) == 'reload+,subscription+,awg+,awg-,subscription-,reload-', 'orchestration lock order or switch');
+events = [];
+let recovered = orchestrator.recover(function() { return ops; }, jdir, gen, 'source', {locks});
+expect(recovered.ok && recovered.action == 'restored' && journal.read(jdir, 'source') == null &&
+    join(',', events) == 'reload+,subscription+,awg+,awg-,subscription-,reload-', 'journal recovery did not hold transition locks');
+events = [];
+locks.acquire_subscription = function() { push(events, 'subscription+'); return false; };
+let no_lock = orchestrator.execute(function() { die('factory must not run'); }, jdir4, gen, 'source', first_id, second_id, {locks});
+expect(!no_lock.ok && join(',', events) == 'reload+,subscription+,reload-', 'lock failure cleanup');
+events = [];
+locks.acquire_subscription = function() { push(events, 'subscription+'); return true; };
+locks.with_awg = function() { push(events, 'awg+'); die('sensitive exception fixture'); };
+let thrown = orchestrator.execute(function() { return ops; }, jdir4, gen, 'source', first_id, second_id, {locks});
+expect(!thrown.ok && join(',', events) == 'reload+,subscription+,awg+,subscription-,reload-' &&
+    index(sprintf('%J', thrown), 'sensitive exception fixture') < 0, 'exception handling or lock cleanup');
+let jdir5 = base + '/journal5';
+expect(fs.mkdir(jdir5) && journal.write(jdir5, 'source', first_id, second_id, 'prepared'), 'permissions journal fixture');
 print('AWG atomic generation and crash journal checks passed\n');
