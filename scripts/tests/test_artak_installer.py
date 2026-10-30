@@ -10,7 +10,7 @@ import time
 import unittest
 
 INSTALLER = Path(__file__).resolve().parents[2] / 'artak-install.sh'
-VERSION = '2.4.3-canary.9'
+VERSION = '2.4.3-canary.10'
 ENGINE = 'sing-box-extended_1.14.3-extended-2.7.3_openwrt_aarch64_cortex-a53.apk'
 PACKAGES = ['forkop', 'luci-app-forkop', 'luci-i18n-forkop-ru']
 SUPPORTED = sys.platform.startswith('linux') and hasattr(os, 'geteuid') and os.geteuid() == 0
@@ -58,7 +58,7 @@ if [ -e /awg-no-handler ]; then echo '{}'; else echo '{"amneziawg":{}}'; fi
 ''')
         self.script('bin/wget', '''[ "$1" = -O ]
 case "$3" in
-https://github.com/Menshikovivan/ArtakFork/releases/download/2.4.3-canary.9/*) ;;
+https://github.com/Menshikovivan/ArtakFork/releases/download/2.4.3-canary.10/*) ;;
 *) exit 95;;
 esac
 echo "download:${3##*/}" >> /events

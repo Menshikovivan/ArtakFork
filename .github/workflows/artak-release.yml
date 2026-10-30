@@ -6,7 +6,7 @@ on:
       version:
         description: Package and release version
         required: true
-        default: 2.4.3-canary.9
+        default: 2.4.3-canary.10
         type: string
 
 permissions:
