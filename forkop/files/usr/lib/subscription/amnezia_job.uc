@@ -3,11 +3,25 @@ let fs = require('fs');
 let common = require('core.common');
 let parser = require('subscription.amnezia_conf');
 let root = getenv('ARTAK_AWG_JOB_TEST_DIR') || '/tmp/artak-awg-job';
+function private_root(create) {
+    let self = fs.stat('/proc/self');
+    if (self == null) return false;
+    let current = fs.lstat(root);
+    if (current == null && create) {
+        if (!fs.mkdir(root, 0700)) return false;
+        current = fs.lstat(root);
+    }
+    // Never follow a pre-created symlink or chmod a directory controlled by
+    // another local user. The private directory owns all later paths.
+    return current != null && current.type == 'directory' && current.uid == self.uid &&
+        (current.mode & 63) == 0;
+}
 function write_state(state) {
     let tmp = root + '/state.tmp';
     return common.write_private_json_file(tmp, state) != null && fs.rename(tmp, root + '/state.json');
 }
 function status() {
+    if (!private_root(false)) return { ok: false, state: 'unknown' };
     let raw = fs.readfile(root + '/state.json'), state = null;
     if (raw == null || length(raw) > 4096) return { ok: false, state: 'unknown' };
     try { state = json(raw); } catch (e) { return { ok: false, state: 'unknown' }; }
@@ -31,7 +45,7 @@ function start(config, launcher, section) {
         return { ok: false, error: 'Invalid configuration' };
     if (section != null && (type(section) != 'string' || !match(section, /^[A-Za-z0-9_]{1,80}$/)))
         return { ok: false, error: 'Invalid rule section' };
-    if (!common.secure_private_dir(root)) return { ok: false, error: 'Unable to prepare job' };
+    if (!private_root(true)) return { ok: false, error: 'Unable to prepare job' };
     // Atomic mkdir prevents parallel start requests, including finished-job cleanup races.
     if (!fs.mkdir(root + '/lock', 0700)) return { ok: false, error: 'Job is active or requires inspection' };
     if (common.write_private_json_file(root + '/input', { config, section }) == null || !write_state({ state: 'running', started: time() })) {
@@ -46,6 +60,7 @@ function start(config, launcher, section) {
     return { ok: true, state: 'running' };
 }
 function run(driver) {
+    if (!private_root(false)) return;
     let raw = fs.readfile(root + '/input'), request = null;
     fs.unlink(root + '/input');
     try { if (raw != null) request = json(raw); } catch (e) {}
