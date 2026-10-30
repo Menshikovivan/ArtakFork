@@ -46,7 +46,10 @@ function verify(name, table, priority, addresses, peer, ipv4, ipv6, timeout_ms, 
         for (let r in rules) {
             if (type(r) != 'object' || r.oif != name) continue;
             if (int(r.priority) == int(priority) && '' + r.table == table) lookup = true;
-            if (int(r.priority) == int(priority) + 1 && r.action == 'prohibit') deny = true;
+            // ip -N emits the kernel FR_ACT_PROHIBIT value as "8" on
+            // OpenWrt; non-numeric output may spell it as "prohibit".
+            if (int(r.priority) == int(priority) + 1 &&
+                (r.action == 'prohibit' || r.action == '8' || r.action == 8)) deny = true;
         }
         for (let r in entries)
             if (type(r) == 'object' && r.dst == 'default' && r.dev == name && (r.table == null || '' + r.table == table)) route = true;

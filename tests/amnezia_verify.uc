@@ -1,13 +1,14 @@
 let verifier = require('subscription.amnezia_verify');
 function expect(v, m) { if (!v) die(m + '\n'); }
-let peer = 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA=', mode = '', ticks = 0;
+let peer = 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA=', mode = '', ticks = 0, saw6 = false;
 function runner(args) {
     let value;
+    if (args[5] == '-6') saw6 = true;
     if (args[0] == 'ubus') value = { up: mode != 'down', l3_device: 'afawg_a', 'ipv4-address': [{address:'10.0.0.2',mask:32}] };
     else if (args[2] == 'awg') return { ok:true, output:peer + '\t' + (mode == 'old' ? '1' : '9990') + '\n' };
     else if (args[6] == 'rule') value = [
         { priority:1000, oif:'afawg_a', table:mode == 'table' ? '222' : '16866' },
-        { priority:1001, oif:'afawg_a', action:mode == 'deny' ? 'unreachable' : 'prohibit' }
+        { priority:1001, oif:'afawg_a', action:mode == 'deny' ? '7' : (mode == 'numeric' ? '8' : 'prohibit') }
     ];
     else value = [{ dst:'default', dev:mode == 'route' ? 'wan' : 'afawg_a' }];
     return { ok:true, output:sprintf('%J', value) };
@@ -17,6 +18,9 @@ function verify() {
         runner,function(n) { ticks += n; },function() { return ticks; },function() { return 10000; });
 }
 expect(verify().ok, 'Ready device was rejected');
+mode = 'numeric'; ticks = 0;
+expect(verify().ok, 'Numeric FR_ACT_PROHIBIT from OpenWrt was rejected');
+expect(!saw6, 'IPv4-only profile should not require IPv6 policy routes');
 for (let test in ['down','table','deny','route','old']) {
     mode = test; ticks = 0;
     let r = verify();
