@@ -2,6 +2,11 @@
 # OpenWrt QEMU guest only. Creates disposable local test interfaces and keys.
 set -eu
 umask 077
+n=0
+while ! ip link show br-lan >/dev/null 2>&1; do
+    n=$((n+1)); [ "$n" -lt 90 ] || { echo 'br-lan startup timed out' >&2; exit 1; }
+    sleep 1
+done
 ip addr flush dev br-lan
 udhcpc -n -q -i br-lan >/dev/null
 apk update >/dev/null

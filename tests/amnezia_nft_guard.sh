@@ -1,6 +1,8 @@
 #!/bin/sh
 # Isolated proof of a possible marked-socket fail-closed guard. This is NOT
 # installed in Forkop and does not test netifd, reboot, or AWG encryption.
+# Replays the nft statements from stock firewall4 25.12 ruleset reload;
+# this is not a full fw4 run and does not cover user-supplied includes.
 set -eu
 R="afguard$$"; P="afguardpeer$$"; WORK=$(mktemp -d); SERVER=''
 cleanup() {
@@ -24,6 +26,19 @@ ip -n "$P" -6 addr add fd00:1::2/64 dev afwanp nodad
 ip netns exec "$R" nft add table inet artak_guard
 ip netns exec "$R" nft 'add chain inet artak_guard output { type filter hook output priority filter; policy accept; }'
 ip netns exec "$R" nft 'add rule inet artak_guard output meta mark 0x09000001 oifname != "afawg_a" counter drop'
+ip netns exec "$R" nft add table inet fw4
+ip netns exec "$R" nft 'add chain inet fw4 output { type filter hook output priority filter; policy accept; }'
+ip netns exec "$R" nft list chain inet artak_guard output > "$WORK/guard-before"
+cat > "$WORK/fw4-reload.nft" <<'EOF'
+table inet fw4
+flush table inet fw4
+table inet fw4 {
+  chain output { type filter hook output priority filter; policy accept; }
+}
+EOF
+ip netns exec "$R" nft -f "$WORK/fw4-reload.nft"
+ip netns exec "$R" nft list chain inet artak_guard output > "$WORK/guard-after"
+cmp "$WORK/guard-before" "$WORK/guard-after"
 cat > "$WORK/server.py" <<'PY'
 import select, socket, sys, time
 s4 = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s4.bind(('192.0.2.2', 19556))
