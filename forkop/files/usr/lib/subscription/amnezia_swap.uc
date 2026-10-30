@@ -34,4 +34,74 @@ function execute(ops) {
     if (!call('retire_old')) return { ok:true, cleanup_required:true };
     return { ok:true, cleanup_required:false };
 }
-return { execute };
+
+// Coordinates one atomic generation pointer with the durable phase journal.
+// Callers supply lifecycle hooks that establish/verify guard and sing-box;
+// these hooks are not implemented here. Run only under all lifecycle locks.
+function execute_journaled(ops, journal_dir, generation_dir, source, old_id, new_id) {
+    let journal = require('subscription.amnezia_swap_journal');
+    let gen = require('subscription.amnezia_generation');
+    if (gen.current_id(generation_dir, source) != old_id ||
+        gen.read_generation(generation_dir, source, old_id) == null ||
+        gen.read_generation(generation_dir, source, new_id) == null ||
+        !journal.write(journal_dir, source, old_id, new_id, 'prepared'))
+        return { ok:false, error:'Cannot start journaled swap' };
+    function phase(name) { return journal.write(journal_dir, source, old_id, new_id, name); }
+    let wrapped = {
+        prepare: function() { return ops.prepare() === true; },
+        install_union: function() { return ops.install_union() === true && phase('union'); },
+        verify_union: function() { return ops.verify_union() === true; },
+        publish: function() { return gen.switch_to(generation_dir, source, old_id, new_id) && phase('published'); },
+        reload: function() { return ops.reload() === true; },
+        verify_new: function() { return ops.verify_new() === true && phase('verified'); },
+        restore_old: function() {
+            let current = gen.current_id(generation_dir, source);
+            if (current == new_id && !gen.switch_to(generation_dir, source, new_id, old_id)) return false;
+            if (current != old_id && current != new_id) return false;
+            return ops.restore_old() === true;
+        },
+        verify_old: function() { return ops.verify_old() === true; },
+        discard_new: function() { return ops.discard_new() === true; },
+        retire_old: function() { return ops.retire_old() === true && phase('retired'); }
+    };
+    let result = execute(wrapped);
+    if (result.ok && !result.cleanup_required) {
+        if (!journal.clear(journal_dir, source, old_id, new_id, function() { return ops.verify_new() === true; }))
+            return { ok:true, cleanup_required:true };
+    } else if (!result.ok && !result.recovery_required && gen.current_id(generation_dir, source) == old_id) {
+        if (!journal.clear(journal_dir, source, old_id, new_id, function() { return ops.verify_old() === true; }))
+            result.recovery_required = true;
+    }
+    return result;
+}
+
+// Recovery is deliberately conservative: old/new resources are deleted only
+// after the chosen runtime and its guard are verified by trusted lifecycle
+// hooks. Journal removal is a separate operation after full reconciliation.
+function recover(ops, journal_dir, generation_dir, source) {
+    let journal = require('subscription.amnezia_swap_journal');
+    let gen = require('subscription.amnezia_generation');
+    let record = journal.read(journal_dir, source), plan = journal.recovery(journal_dir, generation_dir, source);
+    if (record == null || plan == null || plan.action == 'inspect' || type(ops) != 'object')
+        return { ok:false, error:'Swap recovery needs inspection' };
+    try {
+        if (plan.action == 'restore') {
+            let current = gen.current_id(generation_dir, source);
+            if (current == record.new_generation && !gen.switch_to(generation_dir, source, current, record.old_generation))
+                return { ok:false, error:'Cannot restore old generation' };
+            if (ops.restore_old() !== true || ops.verify_old() !== true || ops.discard_new() !== true)
+                return { ok:false, error:'Cannot safely restore old routing' };
+            if (!journal.clear(journal_dir, source, record.old_generation, record.new_generation, function() { return ops.verify_old() === true; }))
+                return { ok:false, error:'Cannot clear recovered journal' };
+            return { ok:true, action:'restored' };
+        }
+        if (ops.verify_new() !== true || ops.retire_old() !== true)
+            return { ok:false, error:'Cannot safely finish new routing' };
+        if (record.phase == 'verified' && !journal.write(journal_dir, source, record.old_generation, record.new_generation, 'retired'))
+            return { ok:false, error:'Cannot record swap cleanup' };
+        if (!journal.clear(journal_dir, source, record.old_generation, record.new_generation, function() { return ops.verify_new() === true; }))
+            return { ok:false, error:'Cannot clear finished journal' };
+        return { ok:true, action:'finished' };
+    } catch (e) { return { ok:false, error:'Swap recovery failed' }; }
+}
+return { execute, execute_journaled, recover };

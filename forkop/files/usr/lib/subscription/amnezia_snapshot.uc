@@ -57,22 +57,21 @@ function load(dir) {
 function build(dir, candidate_dir, active_dir, sources, cursor, timeout_ms, occupied_marks, opts) {
     if (type(sources) != 'array' || length(sources) > 32 || type(occupied_marks) != 'array') return null;
     opts = type(opts) == 'object' ? opts : {};
-    let restore = type(opts.restore) == 'function' ? opts.restore : require('subscription.amnezia_restore').restore;
-    let revision_fn = type(opts.revision) == 'function' ? opts.revision : require('subscription.amnezia_store').revision;
-    let peek = type(opts.peek) == 'function' ? opts.peek : require('subscription.amnezia_active').peek;
+    let generation_dir = opts.generation_dir || getenv('FORKOP_AWG_GENERATION_DIR') || '/etc/forkop/awg-generations';
+    let gen = require('subscription.amnezia_generation');
+    let restore = type(opts.restore_generation) == 'function' ? opts.restore_generation : require('subscription.amnezia_generation_restore').restore;
+    let current_generation = type(opts.current_generation) == 'function' ? opts.current_generation : gen.current_id;
     let entries = [], seen = {};
     for (let s in sources) {
         if (type(s) != 'object' || type(s.source) != 'string' || seen[s.source]) return null;
         seen[s.source] = true;
-        let revision = peek(active_dir, s.source, s.identity);
-        if (revision == null) return null;
-        if (revision_fn(candidate_dir + '/' + revision, s.source, s.identity) != revision) return null;
-        let active = restore(candidate_dir, active_dir, s.source, s.identity, cursor, timeout_ms);
-        if (type(active) != 'array') return null;
-        for (let e in active)
+        let restored = restore(generation_dir, candidate_dir, s.source, cursor, timeout_ms, { matches_source: function() { return true; } });
+        if (type(restored) != 'object' || restored.identity != s.identity || type(restored.entries) != 'array') return null;
+        let revision = restored.revision;
+        for (let e in restored.entries)
             push(entries, { index: e.index, name: e.name, table: e.table, priority: e.priority,
                 source: s.source, identity: s.identity, revision });
-        if (revision_fn(candidate_dir + '/' + revision, s.source, s.identity) != revision) return null;
+        if (current_generation(generation_dir, s.source) != restored.generation) return null;
     }
     let planned = guard.plan(entries, occupied_marks, 0x08000000);
     if (!planned.ok) return null;

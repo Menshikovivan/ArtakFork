@@ -858,19 +858,27 @@ function add_awg_subscription_source(config, section, source_section, source_ent
     let candidate_dir = getenv('FORKOP_AWG_CANDIDATE_DIR') || '/etc/forkop/awg-subscription-candidates';
     let last_good_dir = getenv('FORKOP_AWG_LAST_GOOD_DIR') || '/etc/forkop/awg-last-good';
     let active_dir = getenv('FORKOP_AWG_ACTIVE_DIR') || '/etc/forkop/awg-active';
+    let generation_dir = getenv('FORKOP_AWG_GENERATION_DIR') || '/etc/forkop/awg-generations';
     try {
         let identity = manual_identity || runtime_subscription.awg_source_identity(source_section, source_entry,
             connections.subscription_user_agent(section, source_entry), connections.subscription_hwid(section, source_entry), candidate_dir);
         if (identity == null) return 0;
         let cursor = uci_cursor();
         if (cursor.load('network') == null) return 0;
-        let entries = require('subscription.amnezia_restore').restore(last_good_dir, active_dir, source_section, identity, cursor, 3000);
+        let restored = require('subscription.amnezia_generation_restore').restore(generation_dir, last_good_dir, source_section, cursor, 3000,
+            { matches_source: function(url, ua, hwid) {
+                if (manual_identity != null) return url == '' && ua == '' && hwid == '';
+                return runtime_subscription.awg_source_identity(source_section, source_entry,
+                    connections.subscription_user_agent(section, source_entry), connections.subscription_hwid(section, source_entry), candidate_dir) == identity;
+            } });
+        if (type(restored) != 'object' || restored.identity != identity) return 0;
+        let entries = restored.entries;
         if (type(entries) != 'array' || !length(entries)) return 0;
         let snapshot_dir = getenv('FORKOP_AWG_SNAPSHOT_DIR') || '/etc/forkop/awg-snapshot';
         let snapshot_module = require('subscription.amnezia_snapshot');
         let snapshot = snapshot_module.load(snapshot_dir);
         if (snapshot == null) return 0;
-        let revision = require('subscription.amnezia_active').peek(active_dir, source_section, identity);
+        let revision = restored.revision;
         if (revision == null) return 0;
         let selected = [];
         for (let item in snapshot.entries)
@@ -914,6 +922,9 @@ function add_subscription_source_with_state(config, section, source_index, sourc
     // A successfully promoted AWG-only source supersedes a retained legacy
     // cache. Do not accidentally resurrect old VLESS nodes after migration.
     if (require('subscription.amnezia_feature').enabled()) {
+        let generation_dir = getenv('FORKOP_AWG_GENERATION_DIR') || '/etc/forkop/awg-generations';
+        if (fs.stat(generation_dir + '/' + source_section + '.current') != null)
+            return add_awg_subscription_source(config, section, source_section, source_entry, taken, selector_tags, urltest_candidate_tags, state);
         let status_dir = getenv('FORKOP_AWG_STATUS_DIR') || '/etc/forkop/awg-subscription-status';
         let candidate_dir = getenv('FORKOP_AWG_CANDIDATE_DIR') || '/etc/forkop/awg-subscription-candidates';
         let status = require('subscription.amnezia_status').read(status_dir, source_section);
@@ -3774,29 +3785,56 @@ function build_awg_snapshot() {
     let candidate_dir = getenv('FORKOP_AWG_CANDIDATE_DIR') || '/etc/forkop/awg-subscription-candidates';
     let last_good_dir = getenv('FORKOP_AWG_LAST_GOOD_DIR') || '/etc/forkop/awg-last-good';
     let active_dir = getenv('FORKOP_AWG_ACTIVE_DIR') || '/etc/forkop/awg-active';
+    let generation_dir = getenv('FORKOP_AWG_GENERATION_DIR') || '/etc/forkop/awg-generations';
+    let status_dir = getenv('FORKOP_AWG_STATUS_DIR') || '/etc/forkop/awg-subscription-status';
     let snapshot_dir = getenv('FORKOP_AWG_SNAPSHOT_DIR') || '/etc/forkop/awg-snapshot';
     let sources = [];
+    let cursor = uci_cursor();
+    if (cursor.load('network') == null) return false;
     let manual_seen = {};
     for (let section in enabled_sections('')) {
         let manual_source = require('subscription.amnezia_manual_source').from_id(section.manual_awg_id);
         if (manual_source != null) {
             if (manual_seen[manual_source.source]) return false;
             manual_seen[manual_source.source] = true;
-            if (fs.stat(active_dir + '/' + manual_source.source + '.json') != null)
-                push(sources, manual_source);
+            let manual_pointer = generation_dir + '/' + manual_source.source + '.current';
+            if (fs.stat(manual_pointer) == null && fs.stat(active_dir + '/' + manual_source.source + '.json') != null) {
+                let expected = section.manual_awg_id, section_id = section['.name'];
+                let current = function() {
+                    uci_core.reload(CONFIG_NAME);
+                    let fresh = uci_core.get_all(CONFIG_NAME, section_id);
+                    return type(fresh) == 'object' && fresh.manual_awg_id == expected;
+                };
+                if (!require('subscription.amnezia_manual_source').migrate(last_good_dir, active_dir, generation_dir,
+                    manual_source.source, manual_source.identity, cursor, 3000, { current })) return false;
+            }
+            if (fs.stat(manual_pointer) != null) push(sources, manual_source);
         }
         let urls = connections.subscription_urls(section);
         for (let i = 0; i < length(urls); i++) {
             let source = runtime_subscription.source_id(section['.name'], i + 1);
-            if (fs.stat(active_dir + '/' + source + '.json') == null) continue;
+            let pointer = generation_dir + '/' + source + '.current';
+            if (fs.stat(pointer) == null && fs.stat(active_dir + '/' + source + '.json') == null) continue;
             let identity = runtime_subscription.awg_source_identity(source, urls[i],
                 connections.subscription_user_agent(section, urls[i]), connections.subscription_hwid(section, urls[i]), candidate_dir);
             if (identity == null) return false;
+            if (fs.stat(pointer) == null) {
+                let expected_source = urls[i], source_index = i, section_id = section['.name'];
+                let current = function() {
+                    uci_core.reload(CONFIG_NAME);
+                    connections.set_item_sections_from_cursor(uci_cursor(), CONFIG_NAME);
+                    let fresh = uci_core.get_all(CONFIG_NAME, section_id);
+                    let fresh_urls = connections.subscription_urls(fresh);
+                    return type(fresh_urls) == 'array' && fresh_urls[source_index] == expected_source &&
+                        runtime_subscription.awg_source_identity(source, expected_source,
+                            connections.subscription_user_agent(fresh, expected_source), connections.subscription_hwid(fresh, expected_source), candidate_dir) == identity;
+                };
+                if (!require('subscription.amnezia_generation_migrate').migrate(status_dir, active_dir, last_good_dir,
+                    generation_dir, source, cursor, 3000, { current })) return false;
+            }
             push(sources, { source, identity });
         }
     }
-    let cursor = uci_cursor();
-    if (length(sources) && cursor.load('network') == null) return false;
     let result = require('subscription.amnezia_snapshot').build(snapshot_dir, last_good_dir, active_dir, sources, cursor, 3000, []);
     if (result == null) return false;
     print(result.revision, '\n');

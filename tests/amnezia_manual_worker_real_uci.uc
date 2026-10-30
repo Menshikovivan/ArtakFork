@@ -9,7 +9,7 @@ let config = '[Interface]\nPrivateKey = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 let inspect = function() { return uci.cursor(root, root + '/delta2', ''); };
 let calls = 0, opts = {
  config_dir: root, job_root: root, reload_lock: root + '/reload', subscription_lock: root + '/subscription',
- dirs: {candidate:root + '/candidate',last_good:root + '/good',active:root + '/active'},
+ dirs: {candidate:root + '/candidate',last_good:root + '/good',active:root + '/active',generation:root + '/generation'},
  feature: function() { return feature.enabled(inspect()); }, pending: function() { return false; },
  activate: function(text, source, identity, dirs, state) {
    calls++; expect(text == config && state.current(), 'mock backend sees current saved binding');

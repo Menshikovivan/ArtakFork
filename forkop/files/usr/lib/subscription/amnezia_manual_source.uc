@@ -39,7 +39,7 @@ function stage(candidate_dir, source, identity, text) {
 // immutable promotion happens before manifest update; failures retain the
 // previously published manifest. Recheck source/rule guard immediately before
 // calling this function, under the same lifecycle locks.
-function publish(candidate_dir, last_good_dir, active_dir, source, identity, revision, entry, verify) {
+function publish(candidate_dir, last_good_dir, active_dir, source, identity, revision, entry, verify, generation_dir) {
     if (!valid(source, identity) || type(verify) != 'function' || type(entry) != 'object' ||
         type(revision) != 'string' || !match(revision, /^[0-9a-f]{64}$/))
         return { ok: false, error: 'Invalid manual publication' };
@@ -50,12 +50,35 @@ function publish(candidate_dir, last_good_dir, active_dir, source, identity, rev
     if (store.revision(candidate_dir, source, identity) != revision)
         return { ok: false, error: 'Manual candidate changed' };
     let clean = { index: 0, name: entry.name, table: entry.table, priority: entry.priority };
-    if (!active.save(active_dir, source, identity, revision, [clean], verify))
+    let generation = require('subscription.amnezia_generation');
+    let record = { version:1, kind:'manual', source, identity, revision, url:'', user_agent:'', hwid:'', entries:[clean] };
+    let old = generation.current_id(generation_dir, source);
+    let staged = generation.stage(generation_dir, last_good_dir, record, verify);
+    if (staged == null || !generation.switch_to(generation_dir, source, old, staged))
         return { ok: false, error: 'Manual verification or publication failed' };
-    return { ok: true, source, identity, revision };
+    return { ok: true, source, identity, revision, generation:staged };
 }
-function restore(last_good_dir, active_dir, source, identity, cursor, timeout_ms, opts) {
+function restore(last_good_dir, generation_dir, source, identity, cursor, timeout_ms, opts) {
     if (!valid(source, identity)) return null;
-    return require('subscription.amnezia_restore').restore(last_good_dir, active_dir, source, identity, cursor, timeout_ms, opts);
+    opts = type(opts) == 'object' ? opts : {};
+    let settings = { matches_source: function(url, ua, hwid) { return url == '' && ua == '' && hwid == ''; },
+        uci_check:opts.uci_check, live_check:opts.live_check };
+    let result = require('subscription.amnezia_generation_restore').restore(generation_dir, last_good_dir, source, cursor, timeout_ms, settings);
+    return type(result) == 'object' && result.identity == identity ? result.entries : null;
 }
-return { stage, publish, restore, new_id, from_id };
+// Explicit legacy migration: never accept legacy if a current pointer already
+// exists, and only publish after legacy restore/live checks and source guard.
+function migrate(last_good_dir, active_dir, generation_dir, source, identity, cursor, timeout_ms, opts) {
+    opts = type(opts) == 'object' ? opts : {};
+    let generation = require('subscription.amnezia_generation');
+    if (!valid(source, identity) || type(opts.current) != 'function' || opts.current() !== true ||
+        fs.stat(generation_dir + '/' + source + '.current') != null) return false;
+    let revision = active.peek(active_dir, source, identity);
+    let entries = require('subscription.amnezia_restore').restore(last_good_dir, active_dir, source, identity, cursor, timeout_ms, opts);
+    if (revision == null || type(entries) != 'array' || !length(entries) || opts.current() !== true ||
+        active.peek(active_dir, source, identity) != revision) return false;
+    let record = {version:1, kind:'manual', source, identity, revision, url:'', user_agent:'', hwid:'', entries};
+    let id = generation.stage(generation_dir, last_good_dir, record, function() { return opts.current() === true; });
+    return id != null && opts.current() === true && generation.switch_to(generation_dir, source, null, id);
+}
+return { stage, publish, restore, migrate, new_id, from_id };

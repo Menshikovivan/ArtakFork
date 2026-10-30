@@ -10,6 +10,9 @@ while ! ip link show br-lan >/dev/null 2>&1 ||
 done
 ip addr flush dev br-lan
 udhcpc -n -q -i br-lan >/dev/null
+# The disposable VM uses its LAN as the temporary QEMU user-network uplink.
+# Stock zone policy may reject that egress; the fw4 test later reloads it.
+/etc/init.d/firewall stop
 apk update >/dev/null
 apk add ip-full >/dev/null
 base=https://github.com/2Grey/awg-openwrt/releases/download/v25.12.6

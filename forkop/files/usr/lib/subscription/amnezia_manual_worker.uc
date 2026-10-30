@@ -37,10 +37,11 @@ function run(text, section, opts) {
         let cursor = uci.cursor(config_dir, delta, '');
         let bound = binding.bind(cursor, section, source.new_id);
         if (!bound.ok) die('bind');
-        let dirs = opts.dirs || {candidate:'/etc/forkop/awg-manual-candidates', last_good:'/etc/forkop/awg-last-good', active:'/etc/forkop/awg-active'};
+        let dirs = opts.dirs || {candidate:'/etc/forkop/awg-manual-candidates', last_good:'/etc/forkop/awg-last-good', active:'/etc/forkop/awg-active', generation:'/etc/forkop/awg-generations'};
         // Replacement needs a separate transactional swap. Never overwrite an
         // existing active mapping while its old interface is still in use.
         if (fs.stat(dirs.active + '/' + bound.source + '.json') != null) die('already-active');
+        if (fs.stat(dirs.generation + '/' + bound.source + '.current') != null) die('already-active');
         let apply = type(opts.activate) == 'function' ? opts.activate : activation.activate;
         result = apply(text, bound.source, bound.identity, dirs, {
             current: function() {

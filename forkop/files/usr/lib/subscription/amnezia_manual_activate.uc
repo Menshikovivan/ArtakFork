@@ -11,7 +11,7 @@ let verifier = require('subscription.amnezia_verify');
 function activate(text, source, identity, dirs, opts) {
     opts = type(opts) == 'object' ? opts : {};
     if (type(dirs) != 'object' || type(dirs.candidate) != 'string' ||
-        type(dirs.last_good) != 'string' || type(dirs.active) != 'string' ||
+        type(dirs.last_good) != 'string' || type(dirs.active) != 'string' || type(dirs.generation) != 'string' ||
         type(opts.current) != 'function') return { ok: false, error: 'Invalid manual activation context' };
     let parsed = conf.parse_conf(text);
     if (!parsed.ok || length(parsed.peers) != 1) return { ok: false, error: 'Invalid manual configuration' };
@@ -48,7 +48,7 @@ function activate(text, source, identity, dirs, opts) {
             return type(u) == 'object' && u.ok === true && type(live) == 'object' && live.ok === true && opts.current() === true;
         };
         let result = null;
-        try { result = manual.publish(dirs.candidate, dirs.last_good, dirs.active, source, identity, candidate.revision, chosen, verify); }
+        try { result = manual.publish(dirs.candidate, dirs.last_good, dirs.active, source, identity, candidate.revision, chosen, verify, dirs.generation); }
         catch (e) {}
         if (type(result) != 'object' || !result.ok) return { ok: false, error: 'Manual publication failed', cleanup_required: !cleanup() };
         return { ok: true, source, identity, revision: candidate.revision, name: chosen.name };

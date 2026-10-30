@@ -374,6 +374,18 @@ function source_cache_is_current(source_section, source_entry, expected_user_age
 function awg_source_identity(source_section, source_entry, expected_user_agent, expected_hwid, private_dir) {
     if (type(source_section) != 'string' || !match(source_section, /^[A-Za-z0-9_-]{1,100}$/))
         return null;
+    let generation_dir = getenv('FORKOP_AWG_GENERATION_DIR') || '/etc/forkop/awg-generations';
+    if (fs.stat(generation_dir + '/' + source_section + '.current') != null) {
+        let gen = require('subscription.amnezia_generation');
+        let id = gen.current_id(generation_dir, source_section);
+        let record = id == null ? null : gen.read_generation(generation_dir, source_section, id);
+        let parsed = parse_source_entry(source_entry);
+        let ua = as_string(expected_user_agent || parsed.user_agent || '');
+        if (record == null || record.kind != 'subscription' || record.url != parsed.url ||
+            (ua != '' && ua != record.user_agent) || !hwid_matches_config(expected_hwid, record.hwid)) return null;
+        let calculated = require('subscription.amnezia_identity').calculate(private_dir, source_section, record.url, record.user_agent, record.hwid);
+        return calculated == record.identity ? calculated : null;
+    }
     let url, ua, hwid;
     let status_dir = getenv('FORKOP_AWG_STATUS_DIR') || '/etc/forkop/awg-subscription-status';
     let status = require('subscription.amnezia_status').read(status_dir, source_section);

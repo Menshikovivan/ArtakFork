@@ -84,9 +84,9 @@ expect(index(fs.readfile(snapshot_dir + '/snapshot.json'), key) < 0, 'snapshot l
 expect(snapshot.save(snapshot_dir, [snapshot_entry, snapshot_entry]) == null, 'duplicate snapshot entry accepted');
 expect(snapshot.load(snapshot_dir).revision == saved_snapshot.revision, 'invalid snapshot overwrote previous');
 let build_opts = {
-    revision: function() { return revision; },
-    peek: function() { return revision; },
-    restore: function() { return [{ index: 1, name: 'afawg_a1', table: '10001', priority: '1000' }]; }
+    current_generation: function() { return revision; },
+    restore_generation: function() { return { generation:revision, revision, identity:id,
+        entries:[{ index: 1, name: 'afawg_a1', table: '10001', priority: '1000' }] }; }
 };
 let built = snapshot.build(snapshot_dir, dir, active_dir, [{ source: 'rule_2', identity: id }], null, 1000, [], build_opts);
 expect(built != null && built.entries[0].mark == snapshot_entry.mark, 'verified entries not assembled into snapshot');
@@ -100,6 +100,16 @@ expect(active.save(active_dir, 'fixture2', identity_a, status_revision,
 expect(status.save(ARGV[2], active_dir, good_dir, 'fixture2', 'https://example.invalid/sub', 'agent', 'device', identity_a, status_revision), 'AWG-only status save failed');
 expect(runtime_subscription.awg_source_identity('fixture2', 'https://example.invalid/sub', 'agent', 'device', dir) == identity_a, 'AWG-only status not restored');
 expect(runtime_subscription.awg_source_identity('fixture2', 'https://example.invalid/other', 'agent', 'device', dir) == null, 'changed AWG-only source accepted');
+let generations = dir + '/generations';
+expect(fs.mkdir(generations), 'generation fixture directory');
+let migration_opts = { current:function() { return true; }, uci_check:function() { return { ok:true }; }, live_check:function() { return { ok:true }; } };
+expect(require('subscription.amnezia_generation_migrate').migrate(ARGV[2], active_dir, good_dir, generations,
+    'fixture2', null, 1000, migration_opts), 'legacy subscription migration failed');
+let restored_generation = require('subscription.amnezia_generation_restore').restore(generations, good_dir, 'fixture2', null, 1000,
+    { matches_source:function(url) { return url == 'https://example.invalid/sub'; }, uci_check:migration_opts.uci_check, live_check:migration_opts.live_check });
+expect(restored_generation != null && restored_generation.identity == identity_a, 'migrated subscription generation failed');
+expect(require('subscription.amnezia_generation_restore').restore(generations, good_dir, 'fixture2', null, 1000,
+    { matches_source:function() { return false; }, uci_check:migration_opts.uci_check, live_check:migration_opts.live_check }) == null, 'changed source restored');
 let manifest = { dir: active_dir, revision: revision, verify: function(e) { return e.name == 'afawg_a1'; } };
 let stale_manifest = { dir: active_dir, revision: other, verify: manifest.verify };
 expect(!candidate_apply.apply_one_and_record(dir, 'rule_2', id, 1, allocation[0], 1000, { apply_driver: fake_apply }, stale_manifest).ok && called == 1, 'stale revision reached runtime');

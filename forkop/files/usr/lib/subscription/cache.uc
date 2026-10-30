@@ -853,6 +853,16 @@ function awg_current_status(source, parsed) {
     let status_dir = getenv('FORKOP_AWG_STATUS_DIR') || '/etc/forkop/awg-subscription-status';
     let active_dir = getenv('FORKOP_AWG_ACTIVE_DIR') || '/etc/forkop/awg-active';
     let good_dir = getenv('FORKOP_AWG_LAST_GOOD_DIR') || '/etc/forkop/awg-last-good';
+    let gen_dir = getenv('FORKOP_AWG_GENERATION_DIR') || '/etc/forkop/awg-generations';
+    if (fs.stat(gen_dir + '/' + source + '.current') != null) {
+        let cursor = require('uci').cursor();
+        if (!cursor || cursor.load('network') == null) return null;
+        let result = require('subscription.amnezia_generation_restore').restore(gen_dir, good_dir, source, cursor, 3000,
+            { matches_source: function(url, ua, hwid) { return source_cache_profile_matches(parsed, url, ua, hwid, get_subscription_user_agent('')); } });
+        if (result == null) return null;
+        let record = require('subscription.amnezia_generation').read_generation(gen_dir, source, result.generation);
+        return record != null && record.kind == 'subscription' ? record : null;
+    }
     let record = require('subscription.amnezia_status').read(status_dir, source);
     if (record == null || !source_cache_profile_matches(parsed, record.url, record.user_agent, record.hwid, get_subscription_user_agent(''))) return null;
     let identity = require('subscription.amnezia_identity').calculate(status_dir, source, record.url, record.user_agent, record.hwid);
@@ -1870,6 +1880,7 @@ function activate_awg_only(section_name_value, source, url, configured_ua, confi
     let active_dir = getenv('FORKOP_AWG_ACTIVE_DIR') || '/etc/forkop/awg-active';
     let good_dir = getenv('FORKOP_AWG_LAST_GOOD_DIR') || '/etc/forkop/awg-last-good';
     let status_dir = getenv('FORKOP_AWG_STATUS_DIR') || '/etc/forkop/awg-subscription-status';
+    let generation_dir = getenv('FORKOP_AWG_GENERATION_DIR') || '/etc/forkop/awg-generations';
     let identity = awg_subscription_source_identity(source, url, effective_ua, effective_hwid);
     let revision = require('subscription.amnezia_store').revision(FORKOP_AWG_CANDIDATE_DIR, source, identity);
     if (identity == '' || revision == null) return 1;
@@ -1880,9 +1891,14 @@ function activate_awg_only(section_name_value, source, url, configured_ua, confi
         let parsed = { url: url, user_agent: configured_ua, hwid: configured_hwid };
         return awg_current_status(source, parsed) != null ? 2 : 1;
     }
-    if (!common.secure_private_dir(active_dir) || !common.secure_private_dir(good_dir) || !common.secure_private_dir(status_dir)) return 1;
+    if (fs.stat(generation_dir + '/' + source + '.current') != null) return 1;
+    if (!common.secure_private_dir(active_dir) || !common.secure_private_dir(good_dir) ||
+        !common.secure_private_dir(status_dir) || !common.secure_private_dir(generation_dir)) return 1;
     function current() {
         uci_core.reload(CONFIG_NAME);
+        connections.set_item_sections_from_cursor({ foreach: function(pkg, stype, fn) {
+            for (let item in uci_core.section_objects(pkg, stype)) fn(item);
+        } }, CONFIG_NAME);
         return subscription_config_is_current(section_name_value, url, configured_ua, configured_hwid, uci_sections());
     }
     if (!current()) return 4;
@@ -1891,7 +1907,17 @@ function activate_awg_only(section_name_value, source, url, configured_ua, confi
         { publish: function(rev) {
             if (!current()) return false;
             if (!require('subscription.amnezia_status').save(status_dir, active_dir, good_dir, source, url, effective_ua, effective_hwid, identity, rev)) return false;
-            return current();
+            let gen = require('subscription.amnezia_generation');
+            let cursor = require('uci').cursor(), migrated = false;
+            try {
+                if (cursor && cursor.load('network') != null)
+                    migrated = require('subscription.amnezia_generation_migrate').migrate(status_dir, active_dir, good_dir,
+                        generation_dir, source, cursor, 3000, { current });
+                if (migrated && current()) return true;
+            } catch (e) {}
+            let created = gen.current_id(generation_dir, source);
+            if (migrated && created != null) gen.remove_current(generation_dir, source, created);
+            return false;
         } });
     if (!result.ok && result.cleanup_required)
         log_message('AWG activation failed and its owned interface needs inspection', 'error');
