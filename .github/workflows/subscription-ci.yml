@@ -60,6 +60,10 @@ jobs:
             -L "$GITHUB_WORKSPACE/forkop/files/usr/lib/*.uc" \
             tests/subscription_source_entry.uc
 
+      - name: Test isolated policy routing for bound sockets
+        shell: bash
+        run: sudo bash tests/amnezia_oif_routing.sh
+
       - name: Test service checks and subscription change reports
         shell: bash
         run: |
