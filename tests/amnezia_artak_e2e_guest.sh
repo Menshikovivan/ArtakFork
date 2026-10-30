@@ -20,6 +20,15 @@ apk --allow-untrusted --simulate add /tmp/forkop.apk /tmp/luci-app-forkop.apk >/
 apk --allow-untrusted add /tmp/forkop.apk /tmp/luci-app-forkop.apk >/dev/null
 apk add sing-box >/dev/null
 /etc/init.d/rpcd restart
+echo 'E2E stage: inspect installed rpcd plugin'
+ls -l /usr/libexec/rpcd/luci.artak_awg || exit 1
+test -x /usr/libexec/rpcd/luci.artak_awg || { echo 'rpcd plugin is not executable' >&2; exit 1; }
+/usr/libexec/rpcd/luci.artak_awg list || { echo 'rpcd plugin list failed' >&2; exit 1; }
+count=0
+until ubus -S list luci.artak_awg 2>/dev/null | grep -q 'luci.artak_awg'; do
+    count=$((count+1)); [ "$count" -lt 60 ] || { echo 'rpcd AWG object did not appear' >&2; ubus list 2>/dev/null || :; logread | grep -i rpcd | tail -30 || :; exit 1; }
+    sleep 1
+done
 
 echo 'E2E stage: create disposable local peer'
 awg genkey >/tmp/e2e-client.key
