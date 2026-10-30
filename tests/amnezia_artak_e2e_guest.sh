@@ -49,6 +49,15 @@ uci set forkop.e2etest.enabled=1
 uci set forkop.e2etest.action=connection
 uci add_list forkop.e2etest.fully_routed_ips=192.0.2.99
 uci commit forkop
+for config in forkop network; do
+    delta="/tmp/.uci/$config"
+    if [ -e "$delta" ]; then
+        echo "E2E stage: $config UCI delta bytes=$(wc -c < "$delta")"
+        # Empty files left by uci commit are not pending changes; this is a
+        # disposable guest and we never discard nonempty staged configuration.
+        [ -s "$delta" ] || rm -f "$delta"
+    fi
+done
 printf '[Interface]\nPrivateKey = %s\nAddress = 10.88.1.1/32\nListenPort = 29001\n[Peer]\nPublicKey = %s\nEndpoint = 127.0.0.1:29002\nAllowedIPs = 0.0.0.0/0\nPersistentKeepalive = 2\n' "$(cat /tmp/e2e-client.key)" "$(cat /tmp/e2e-peer.pub)" >/tmp/e2e.conf
 ucode -e 'let f=require("fs");let c=f.readfile("/tmp/e2e.conf");if(f.writefile("/tmp/e2e-request",sprintf("%J",{config:c,section:"e2etest"}))==null)exit(1);'
 
