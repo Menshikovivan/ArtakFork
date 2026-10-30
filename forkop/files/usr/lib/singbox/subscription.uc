@@ -369,6 +369,20 @@ function source_cache_is_current(source_section, source_entry, expected_user_age
     return true;
 }
 
+// Bind AWG private storage to the actual source metadata used at download.
+// This does not expose the URL or HWID through the returned identity.
+function awg_source_identity(source_section, source_entry, expected_user_agent, expected_hwid, private_dir) {
+    if (type(source_section) != 'string' || !match(source_section, /^[A-Za-z0-9_-]{1,100}$/))
+        return null;
+    if (!source_cache_is_current(source_section, source_entry, expected_user_agent, expected_hwid))
+        return null;
+    let url = file_first_line(TMP_SUBSCRIPTION_FOLDER + '/' + source_section + '.url');
+    let ua = file_first_line(TMP_SUBSCRIPTION_FOLDER + '/' + source_section + '.user_agent');
+    let hwid = file_first_line(source_hwid_path(source_section));
+    if (url == '') return null;
+    return require('subscription.amnezia_identity').calculate(private_dir, source_section, url, ua, hwid);
+}
+
 function source_json_path(source_section) {
     return TMP_SUBSCRIPTION_FOLDER + "/" + source_section + ".json";
 }
@@ -412,6 +426,7 @@ return {
     resolve_urltest_profile_aliases,
     remember_priority_group,
     source_cache_is_current,
+    awg_source_identity,
     read_source_outbounds,
     new_section_state
 };

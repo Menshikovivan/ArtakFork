@@ -507,6 +507,23 @@ function nft_insert_rule(table, chain, args) {
     return run_args(command);
 }
 
+// Append fail-closed AWG guards to a not-yet-committed candidate. The caller
+// must bind this snapshot revision to the generator and reject any change.
+function nft_add_awg_guards(table, snapshot_dir, revision) {
+    if (NFT_BATCH_FILE == '' || type(revision) != 'string' || !match(revision, /^[0-9a-f]{64}$/)) return false;
+    let snapshot = require('subscription.amnezia_snapshot').load(snapshot_dir);
+    if (type(snapshot) != 'object' || snapshot.revision != revision || type(snapshot.entries) != 'array') return false;
+    let planned = require('subscription.amnezia_guard_plan').plan(snapshot.entries, [], 0x08000000);
+    if (!planned.ok || length(planned.guards) != length(snapshot.entries)) return false;
+    for (let i = 0; i < length(planned.guards); i++) {
+        let guard = planned.guards[i];
+        if (snapshot.entries[i].mark != guard.mark) return false;
+        if (!nft_insert_rule(table, 'mangle_output', ['meta', 'mark', '==', sprintf('0x%08x', guard.mark),
+            'oifname', '!=', '"' + guard.name + '"', 'counter', 'drop'])) return false;
+    }
+    return true;
+}
+
 let LOCALV4_RANGES = [
     "0.0.0.0/8",
     "10.0.0.0/8",
@@ -2075,6 +2092,8 @@ else if (mode == "csv-to-lines-file")
     csv_to_lines_file(ARGV[1], ARGV[2]);
 else if (mode == "nft-create-runtime-base")
     exit(nft_create_runtime_base(ARGV[1], ARGV[2], ARGV[3], ARGV[4], ARGV[5], ARGV[6], ARGV[7], ARGV[8], ARGV[9], ARGV[10], ARGV[11], ARGV[12], ARGV[13], ARGV[14], ARGV[15], ARGV[16], ARGV[17]) ? 0 : 1);
+else if (mode == "nft-add-awg-guards")
+    exit(nft_add_awg_guards(ARGV[1], ARGV[2], ARGV[3]) ? 0 : 1);
 else if (mode == "nft-create-runtime-base-from-uci")
     exit(nft_create_runtime_base_from_uci(ARGV[1], ARGV[2], ARGV[3], ARGV[4], ARGV[5], ARGV[6], ARGV[7], ARGV[8], ARGV[9], ARGV[10], ARGV[11], ARGV[12], ARGV[13], ARGV[14], ARGV[15]) ? 0 : 1);
 else if (mode == "nft-create-runtime-output-rules")

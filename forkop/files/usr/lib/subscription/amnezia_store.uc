@@ -36,6 +36,40 @@ function load(dir, source, identity) {
     return map(configs, config => parser.parse_conf(config));
 }
 
+// Hash the private file by pathname only; credentials never enter argv or logs.
+// The caller must hold the subscription lock across revision and use.
+function revision(dir, source, identity) {
+    if (type(dir) != 'string' || dir == '' || dir == '/' || load_configs(dir, source, identity) == null)
+        return null;
+    let path = dir + '/' + source + '.awg.json';
+    let quoted = "'" + replace(path, /'/g, "'\\''") + "'";
+    let pipe = fs.popen('sha256sum ' + quoted + ' 2>/dev/null', 'r');
+    if (!pipe) return null;
+    let output = pipe.read('all');
+    let status = pipe.close();
+    if (status != 0 || type(output) != 'string') return null;
+    let digest = split(trim(output), /[ \t\r\n]+/)[0];
+    return identity_ok(digest) ? digest : null;
+}
+
+// Store immutable last-good bytes under their digest. Publishing a new manifest
+// is a separate atomic step, so a failed publication never destroys the old
+// revision. Caller holds subscription/lifecycle locks throughout promotion.
+function promote(dir, last_good_dir, source, identity, expected) {
+    if (!identity_ok(expected) || revision(dir, source, identity) != expected ||
+        type(last_good_dir) != 'string' || last_good_dir == '' || last_good_dir == '/' ||
+        !common.secure_private_dir(last_good_dir)) return false;
+    let target_dir = last_good_dir + '/' + expected;
+    if (!common.secure_private_dir(target_dir)) return false;
+    if (revision(target_dir, source, identity) == expected) return true;
+    let content = fs.readfile(dir + '/' + source + '.awg.json');
+    if (type(content) != 'string' || revision(dir, source, identity) != expected) return false;
+    let t = clock(), tmp = sprintf('%s/.%s-%d-%d.tmp', target_dir, source, t[0], t[1]);
+    if (common.write_private_file(tmp, content) == null) { fs.unlink(tmp); return false; }
+    if (!fs.rename(tmp, target_dir + '/' + source + '.awg.json')) { fs.unlink(tmp); return false; }
+    return revision(target_dir, source, identity) == expected;
+}
+
 function save(dir, source, identity, data) {
     if (!source_ok(source) || !identity_ok(identity) || type(dir) != 'string' || dir == '' || dir == '/')
         return false;
@@ -57,4 +91,4 @@ function save(dir, source, identity, data) {
     return true;
 }
 
-return { save, load, load_configs };
+return { save, load, load_configs, revision, promote };

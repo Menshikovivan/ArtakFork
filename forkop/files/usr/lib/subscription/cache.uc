@@ -1808,25 +1808,31 @@ function subscription_config_is_current(section_name_value, subscription_url, su
     return false;
 }
 
-// Stage only: this does not activate or advertise a tunnel. The source identity
-// must never be included in process arguments or logs. A private temporary
-// file supplies sha256sum with a path, not the subscription URL or HWID.
+// The identity file is private and sha256sum receives only its path, never a
+// subscription URL or HWID as an argument. Callers must not log the identity.
+function awg_subscription_source_identity(source, url, user_agent, hwid) {
+    if (!cache_section_is_safe(source)) return '';
+    let identity_path = temp_path(TMP_SUBSCRIPTION_FOLDER, source, 'awg-identity');
+    if (!write_json(identity_path, [as_string(url), as_string(user_agent), as_string(hwid)])) {
+        unlink_path(identity_path);
+        return '';
+    }
+    let digest = split(trim(command_output_from_args([ 'sha256sum', identity_path ])), /[ \t\r\n]+/)[0];
+    unlink_path(identity_path);
+    return match(as_string(digest), /^[0-9a-f]{64}$/) == null ? '' : digest;
+}
+
+// Stage only: this does not activate or advertise a tunnel.
 function stage_awg_subscription_candidate(raw_path, source, url, user_agent, hwid) {
+    if (!cache_section_is_safe(source)) return 2;
     let data = fs.readfile(raw_path);
     if (data == null) return 2;
     let awg = require('subscription.amnezia_subscription');
     let found = awg.extract(data);
     if (!length(found.configs) && !found.invalid) return 1;
     if (!awg.validated(data).ok) return 2;
-    if (!cache_section_is_safe(source)) return 2;
-    let identity_path = temp_path(TMP_SUBSCRIPTION_FOLDER, source, 'awg-identity');
-    if (!write_json(identity_path, [as_string(url), as_string(user_agent), as_string(hwid)])) {
-        unlink_path(identity_path);
-        return 2;
-    }
-    let digest = split(trim(command_output_from_args([ 'sha256sum', identity_path ])), /[ \t\r\n]+/)[0];
-    unlink_path(identity_path);
-    if (match(as_string(digest), /^[0-9a-f]{64}$/) == null) return 2;
+    let digest = awg_subscription_source_identity(source, url, user_agent, hwid);
+    if (digest == '') return 2;
     ensure_dir(FORKOP_AWG_CANDIDATE_DIR);
     if (!require('subscription.amnezia_store').save(FORKOP_AWG_CANDIDATE_DIR, source, digest, data))
         return 2;
@@ -1902,7 +1908,7 @@ function download_subscription_into_cache(section_name_value, subscription_url, 
         // and the running tunnel untouched; mixed legacy proxies still import.
         if (as_string(getenv('FORKOP_AWG_STAGE_CANDIDATES')) == '1' &&
             subscription_config_is_current(section_name_value, subscription_url, subscription_user_agent, subscription_hwid, sections)) {
-            let awg_status = stage_awg_subscription_candidate(raw_tmpfile, cache_section, subscription_url, subscription_user_agent, subscription_hwid);
+            let awg_status = stage_awg_subscription_candidate(raw_tmpfile, cache_section, subscription_url, effective_user_agent, effective_hwid);
             if (awg_status == 2)
                 log_message("AmneziaWG subscription candidate could not be staged; previous candidate retained", "warn");
         }

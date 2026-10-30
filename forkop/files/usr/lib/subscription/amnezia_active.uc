@@ -57,4 +57,16 @@ function restore(dir, source, identity, revision, verify) {
     return checked(record.entries, verify);
 }
 
-return { save, restore };
+// This only selects a candidate immutable revision. It does not establish
+// readiness; restore() must still validate every entry with a live verifier.
+function peek(dir, source, identity) {
+    if (type(dir) != 'string' || dir == '' || !safe_source(source) || !safe_hash(identity)) return null;
+    let data = fs.readfile(dir + '/' + source + '.json');
+    if (type(data) != 'string' || length(data) > 16384) return null;
+    let record; try { record = json(data); } catch (e) { return null; }
+    if (type(record) != 'object' || record.version != 1 || record.source != source ||
+        record.identity != identity || !safe_hash(record.revision)) return null;
+    return record.revision;
+}
+
+return { save, restore, peek };

@@ -8,6 +8,8 @@ let routes = require('subscription.amnezia_routes');
 let activation = require('subscription.amnezia_activate');
 let runtime_check = require('subscription.amnezia_runtime_check');
 let handshake = require('subscription.amnezia_handshake');
+let conf = require('subscription.amnezia_conf');
+let verifier = require('subscription.amnezia_verify');
 
 function normalized(section) {
     if (type(section) != 'object') return null;
@@ -90,4 +92,53 @@ function apply(text, name, table, priority, timeout_ms, opts) {
     fs.rmdir(lock_dir);
     return result;
 }
-return { apply };
+// For a just-created profile only. Exact UCI matching before and after stop
+// avoids knowingly deleting modified sections. UCI offers no cross-process CAS:
+// a noncooperating writer can still race between the final check and commit.
+function cleanup(text, name, table, priority, opts) {
+    opts = opts || {};
+    let config_dir = opts.config_dir || '/etc/config';
+    let lock_dir = opts.lock_dir || '/tmp/artak-awg-apply.lock', delta = lock_dir + '/delta';
+    if (type(text) != 'string' || length(text) > 65536) return { ok:false, error:'Invalid cleanup request' };
+    let parsed = conf.parse_conf(text);
+    if (!parsed.ok || length(parsed.peers) != 1) return { ok:false, error:'Invalid cleanup configuration' };
+    let ipv4 = false, ipv6 = false;
+    for (let a in parsed.peers[0].allowed_ips) {
+        if (a == '0.0.0.0/0') ipv4 = true;
+        if (a == '::/0') ipv6 = true;
+    }
+    let plan = routes.prepare(name, table, priority, ipv4, ipv6);
+    if (!plan.ok) return { ok:false, error:'Invalid cleanup allocation' };
+    if (!fs.mkdir(lock_dir)) return { ok:false, error:'Another import is running or a stale lock exists' };
+    let created_delta = false;
+    function process() {
+        try {
+            if (config_dir == '/etc/config' && fs.stat('/tmp/.uci/network') != null)
+                return {ok:false,error:'Pending network changes detected'};
+            if (!fs.chmod(lock_dir, 448) || !fs.mkdir(delta)) return {ok:false,error:'Could not create private UCI workspace'};
+            created_delta = true;
+            let c = uci.cursor(config_dir, delta, '');
+            if (!c || c.load('network') == null || !verifier.verify_uci(c, parsed, name, table, priority, ipv4, ipv6).ok)
+                return {ok:false,error:'Owned configuration differs; cleanup refused'};
+            if (!activation.stop(name, opts.runner).ok)
+                return {ok:false,error:'Could not stop interface; cleanup refused'};
+            c = uci.cursor(config_dir, delta, '');
+            if (!c || c.load('network') == null || !verifier.verify_uci(c, parsed, name, table, priority, ipv4, ipv6).ok)
+                return {ok:false,error:'Owned configuration changed; cleanup refused'};
+            let names = [name, name + '_peer'];
+            for (let e in plan.entries) push(names, e.name);
+            for (let n in names) if (c.delete('network', n) == null)
+                return {ok:false,error:'Could not stage cleanup'};
+            if (!c.commit('network')) return {ok:false,error:'Cleanup commit uncertain; inspect network'};
+            if (config_dir == '/etc/config' && fs.stat('/tmp/.uci/network') != null)
+                return {ok:false,error:'Pending network changes appeared; reload refused'};
+            if (!activation.reload(opts.runner).ok) return {ok:false,error:'Cleanup committed but network reload failed'};
+            return {ok:true};
+        } catch (e) { return {ok:false,error:'Cleanup failed; inspect network'}; }
+    }
+    let result = process();
+    if (created_delta) { fs.unlink(delta + '/network'); fs.rmdir(delta); }
+    fs.rmdir(lock_dir);
+    return result;
+}
+return { apply, cleanup };

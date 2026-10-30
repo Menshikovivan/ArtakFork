@@ -131,6 +131,20 @@ const BYEDPI_UC = LIB_DIR + "/providers/byedpi/runtime.uc";
 const PACKAGES_UC = LIB_DIR + "/core/packages.uc";
 
 let start_subscription_update_lock_held = false;
+let awg_network_lock_held = false;
+const AWG_NETWORK_LOCK_DIR = '/tmp/artak-awg-apply.lock';
+
+function acquire_awg_network_lock() {
+    if (awg_network_lock_held) return true;
+    if (!fs.mkdir(AWG_NETWORK_LOCK_DIR)) return false;
+    awg_network_lock_held = true;
+    return true;
+}
+
+function release_awg_network_lock() {
+    if (awg_network_lock_held) fs.rmdir(AWG_NETWORK_LOCK_DIR);
+    awg_network_lock_held = false;
+}
 let subscription_caches_prepared = getenv("FORKOP_SUBSCRIPTION_CACHES_PREPARED") || "0";
 let subscription_runtime_no_refresh = getenv("FORKOP_SUBSCRIPTION_RUNTIME_NO_REFRESH") || "0";
 let subscription_deferred_sections = "";
@@ -684,7 +698,7 @@ function release_start_subscription_update_lock() {
 }
 
 function nft_rebuild_runtime() {
-    return module_status(NFT_UC, [
+    let status = module_status(NFT_UC, [
         "nft-rebuild-runtime-from-uci",
         RT_TABLE_NAME,
         NFT_TABLE_NAME,
@@ -713,6 +727,14 @@ function nft_rebuild_runtime() {
         SB_FAKEIP_INET6_RANGE,
         SB_TPROXY_INBOUND6_ADDRESS
     ]);
+    if (status != 0 || getenv('FORKOP_AWG_EXPERIMENTAL') != '1') return status;
+    // The same immutable snapshot must also be checked by the generator. Never
+    // commit a candidate for AWG if its guard cannot be staged atomically.
+    if (!acquire_awg_network_lock()) return 1;
+    let dir = getenv('FORKOP_AWG_SNAPSHOT_DIR') || '/etc/forkop/awg-snapshot';
+    let s = require('subscription.amnezia_snapshot').load(dir);
+    if (s == null) return 1;
+    return module_status(NFT_UC, [ 'nft-add-awg-guards', NFT_TABLE_NAME, dir, s.revision ]);
 }
 
 function nft_candidate_begin() {
@@ -999,6 +1021,12 @@ function start_main() {
         }
     }
 
+    if (getenv('FORKOP_AWG_EXPERIMENTAL') == '1') {
+        if (!acquire_awg_network_lock()) return start_phase_failed('awg-network-lock', 1);
+        let result = module_capture(LIB_DIR + '/singbox/generator.uc', ['amnezia-snapshot-build']);
+        if (result.status != 0 || !match(trim(result.output), /^[0-9a-f]{64}$/))
+            return start_phase_failed('awg-snapshot', 1);
+    }
     if (!nft_candidate_begin())
         return start_phase_failed("nft-candidate-begin", 1);
     status = nft_rebuild_runtime();
@@ -2290,4 +2318,5 @@ else {
 }
 
 release_start_subscription_update_lock();
+release_awg_network_lock();
 exit(status);

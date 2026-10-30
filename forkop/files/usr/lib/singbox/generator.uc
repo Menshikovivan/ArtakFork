@@ -850,6 +850,64 @@ function assert_unique_outbound_tags(config) {
     }
 }
 
+// Experimental until the runtime guard exists and has been installed. A live
+// interface/handshake check alone cannot protect traffic after an interface
+// disappears. Refuse to emit an outbound if any prerequisite is unavailable.
+function add_awg_subscription_source(config, section, source_section, source_entry, taken, selector_tags, urltest_candidate_tags, state) {
+    if (getenv('FORKOP_AWG_EXPERIMENTAL') != '1') return 0;
+    let candidate_dir = getenv('FORKOP_AWG_CANDIDATE_DIR') || '/etc/forkop/awg-subscription-candidates';
+    let last_good_dir = getenv('FORKOP_AWG_LAST_GOOD_DIR') || '/etc/forkop/awg-last-good';
+    let active_dir = getenv('FORKOP_AWG_ACTIVE_DIR') || '/etc/forkop/awg-active';
+    try {
+        let identity = runtime_subscription.awg_source_identity(source_section, source_entry,
+            connections.subscription_user_agent(section, source_entry), connections.subscription_hwid(section, source_entry), candidate_dir);
+        if (identity == null) return 0;
+        let cursor = uci_cursor();
+        if (cursor.load('network') == null) return 0;
+        let entries = require('subscription.amnezia_restore').restore(last_good_dir, active_dir, source_section, identity, cursor, 3000);
+        if (type(entries) != 'array' || !length(entries)) return 0;
+        let snapshot_dir = getenv('FORKOP_AWG_SNAPSHOT_DIR') || '/etc/forkop/awg-snapshot';
+        let snapshot_module = require('subscription.amnezia_snapshot');
+        let snapshot = snapshot_module.load(snapshot_dir);
+        if (snapshot == null) return 0;
+        let revision = require('subscription.amnezia_active').peek(active_dir, source_section, identity);
+        if (revision == null) return 0;
+        let selected = [];
+        for (let item in snapshot.entries)
+            if (item.source == source_section && item.identity == identity && item.revision == revision)
+                push(selected, item);
+        if (length(selected) != length(entries)) return 0;
+        // guard.verify must prove the currently installed persistent WAN guard,
+        // including the mark and interface, before these records are emitted.
+        let result = require('subscription.amnezia_guard').verify(selected, snapshot.revision, { snapshot_dir });
+        if (type(result) != 'object' || result.ok !== true || type(result.entries) != 'array' || length(result.entries) != length(entries)) return 0;
+        let fresh_snapshot = snapshot_module.load(snapshot_dir);
+        if (fresh_snapshot == null || fresh_snapshot.revision != snapshot.revision) return 0;
+        let pending = [];
+        for (let i = 0; i < length(entries); i++) {
+            let e = entries[i], g = result.entries[i];
+            if (type(g) != 'object' || g.name != e.name || g.table != e.table || g.priority != e.priority || g.index != e.index ||
+                g.mark != selected[i].mark || selected[i].name != e.name || selected[i].table != e.table ||
+                selected[i].priority != e.priority || selected[i].index != e.index ||
+                type(g.mark) != 'int' || g.mark <= 0) return 0;
+        }
+        for (let i = 0; i < length(entries); i++) {
+            let e = entries[i], g = result.entries[i];
+            let display_name = 'AmneziaWG ' + (e.index + 1);
+            let tag = unique_tag(display_name, taken);
+            taken[tag] = true;
+            push(pending, { outbound: { type: 'direct', tag: tag, bind_interface: e.name, routing_mark: g.mark }, name: display_name });
+        }
+        for (let item in pending) {
+            push(config.outbounds, item.outbound);
+            push(selector_tags, item.outbound.tag);
+            push(urltest_candidate_tags, item.outbound.tag);
+            runtime_subscription.remember_source_outbound(state, item.outbound.tag, item.name, item.outbound, '', '');
+        }
+        return length(pending);
+    } catch (e) { return 0; }
+}
+
 function add_subscription_source_with_state(config, section, source_index, source_entry, taken, selector_tags, urltest_candidate_tags, state, show_metadata, include_urltest_groups, hide_urltest_group_outbounds, hide_detour_outbounds, node_prefix) {
     let section_name = section[".name"];
     let source_section = runtime_subscription.source_id(section_name, source_index);
@@ -867,7 +925,7 @@ function add_subscription_source_with_state(config, section, source_index, sourc
         effective_subscription_exclude_regex(section, source_entry)
     );
     if (length(source_outbounds) == 0)
-        return 0;
+        return add_awg_subscription_source(config, section, source_section, source_entry, taken, selector_tags, urltest_candidate_tags, state);
 
     let skipped = {};
     for (let outbound in source_outbounds) {
@@ -966,7 +1024,7 @@ function add_subscription_source_with_state(config, section, source_index, sourc
             runtime_subscription.remember_urltest_group(state, outbound.tag, display_names[i], outbound);
         }
     }
-    return added;
+    return added + add_awg_subscription_source(config, section, source_section, source_entry, taken, selector_tags, urltest_candidate_tags, state);
 }
 
 function duration_to_seconds(value) {
@@ -3690,6 +3748,33 @@ function service_route_check_section_fixture() {
         print(as_string(section[".name"]), "\n");
 }
 
+// Called only by the experimental lifecycle under both global locks. The only
+// stdout is a hash; subscription URLs and credentials never leave memory.
+function build_awg_snapshot() {
+    let candidate_dir = getenv('FORKOP_AWG_CANDIDATE_DIR') || '/etc/forkop/awg-subscription-candidates';
+    let last_good_dir = getenv('FORKOP_AWG_LAST_GOOD_DIR') || '/etc/forkop/awg-last-good';
+    let active_dir = getenv('FORKOP_AWG_ACTIVE_DIR') || '/etc/forkop/awg-active';
+    let snapshot_dir = getenv('FORKOP_AWG_SNAPSHOT_DIR') || '/etc/forkop/awg-snapshot';
+    let sources = [];
+    for (let section in enabled_sections('')) {
+        let urls = connections.subscription_urls(section);
+        for (let i = 0; i < length(urls); i++) {
+            let source = runtime_subscription.source_id(section['.name'], i + 1);
+            if (fs.stat(active_dir + '/' + source + '.json') == null) continue;
+            let identity = runtime_subscription.awg_source_identity(source, urls[i],
+                connections.subscription_user_agent(section, urls[i]), connections.subscription_hwid(section, urls[i]), candidate_dir);
+            if (identity == null) return false;
+            push(sources, { source, identity });
+        }
+    }
+    let cursor = uci_cursor();
+    if (length(sources) && cursor.load('network') == null) return false;
+    let result = require('subscription.amnezia_snapshot').build(snapshot_dir, last_good_dir, active_dir, sources, cursor, 3000, []);
+    if (result == null) return false;
+    print(result.revision, '\n');
+    return true;
+}
+
 let mode = ARGV[0] || "";
 
 if (mode == "generate-config")
@@ -3724,6 +3809,8 @@ else if (mode == "object-nonempty")
     exit(object_nonempty_stdin() ? 0 : 1);
 else if (mode == "service-route-check-section-fixture")
     service_route_check_section_fixture();
+else if (mode == "amnezia-snapshot-build")
+    exit(build_awg_snapshot() ? 0 : 1);
 else {
     warn("Usage: singbox/generator.uc <operation> ...\n");
     exit(1);
