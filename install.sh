@@ -466,8 +466,7 @@ function uci_set(path, value) {
         return false;
 
     try {
-        c.set(parts.package, parts.section, parts.option, type(value) == "array" ? value : as_string(value));
-        return true;
+        return c.set(parts.package, parts.section, parts.option, type(value) == "array" ? value : as_string(value)) != false;
     }
     catch (e) {
         return false;
@@ -1445,6 +1444,24 @@ else if (mode == "uci-get") {
     if (value != "")
         print(value, "\n");
 }
+else if (mode == "artak-community-lists") {
+    let c = uci_cursor();
+    if (c == null || !uci_load("forkop"))
+        exit(1);
+    try {
+        c.foreach("forkop", "section", function(section) {
+            for (let item in uci_value_to_list(section.community_lists))
+                print(as_string(item), "\n");
+        });
+    }
+    catch (e) { exit(1); }
+}
+else if (mode == "artak-select-xray") {
+    if (!uci_exists("forkop.settings") ||
+        !uci_set("forkop.settings.routing_engine", "xray") ||
+        !uci_commit("forkop"))
+        exit(1);
+}
 else if (mode == "dnsmasq-failsafe-restore")
     exit(dnsmasq_failsafe_restore() ? 0 : 1);
 else if (mode == "installer-cleanup-legacy")
@@ -1989,12 +2006,10 @@ prepare_artak_xray() {
 }
 
 prepare_artak_community_lists() {
-    command_exists uci || return 0
-    community_keys="$(uci -q show forkop 2>/dev/null | cut -d= -f1 | grep '\.community_lists$' || true)"
+    [ -f /etc/config/forkop ] || return 0
+    community_values="$(install_json_ucode artak-community-lists)" || fail "Cannot read community lists"
     prepared_names=" "
-    for community_key in $community_keys; do
-        community_values="$(uci -q get "$community_key" 2>/dev/null || true)"
-        for community_name in $community_values; do
+    for community_name in $community_values; do
             case "$community_name" in youtube|telegram|meta|discord) ;; *) continue ;; esac
             case "$prepared_names" in *" $community_name "*) continue ;; esac
             prepared_names="$prepared_names$community_name "
@@ -2009,7 +2024,6 @@ prepare_artak_community_lists() {
                 download_with_retry "$list_url" "$list_file" "$community_name $list_kind" ||
                     fail "Failed to prepare required Xray list $community_name ($list_kind)"
             done
-        done
     done
 }
 
@@ -2235,8 +2249,7 @@ main() {
     install_artak_srs
     install_artak_xray
     install_artak_community_lists
-    uci -q set forkop.settings.routing_engine='xray' || fail "Failed to select Xray"
-    uci -q commit forkop || fail "Failed to save Xray selection"
+    install_json_ucode artak-select-xray || fail "Failed to select and save Xray"
     post_install
     ARTAK_TXN_ARMED=0
 

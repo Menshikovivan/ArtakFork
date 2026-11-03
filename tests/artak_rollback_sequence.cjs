@@ -12,5 +12,5 @@ restore_artak_previous`;return cp.spawnSync(sh,['-c',script],{encoding:'utf8'});
 let ok=run('ok');assert.strictEqual(ok.status,0,ok.stdout+ok.stderr);assert(ok.stdout.indexOf('APK')<ok.stdout.indexOf('TAR'));assert(ok.stdout.includes('INIT:restart'));
 for(const failure of ['apkfail','tarfail','initfail'])assert.notStrictEqual(run(failure).status,0,failure);
 let no=run('ok',0);assert.notStrictEqual(no.status,0);assert.strictEqual(no.stdout,'');
-const main=src.slice(src.indexOf('main() {'));for(const [a,b] of [['backup_artak_configuration','prepare_artak_rollback'],['prepare_artak_rollback','cleanup_legacy_installation'],['install_artak_xray',"routing_engine='xray'"],["routing_engine='xray'",'post_install'],['post_install','ARTAK_TXN_ARMED=0']])assert(main.indexOf(a)<main.indexOf(b),a+' before '+b);
+const main=src.slice(src.indexOf('main() {'));for(const [a,b] of [['backup_artak_configuration','prepare_artak_rollback'],['prepare_artak_rollback','cleanup_legacy_installation'],['install_artak_xray',"artak-select-xray"],["artak-select-xray",'post_install'],['post_install','ARTAK_TXN_ARMED=0']])assert(main.indexOf(a)<main.indexOf(b),a+' before '+b);
 console.log('Rollback sequencing and failure reporting: PASS');

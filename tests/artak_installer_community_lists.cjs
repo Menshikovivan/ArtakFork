@@ -3,13 +3,13 @@ const cp = require('child_process');
 const path = require('path');
 const assert = require('assert');
 const source = fs.readFileSync('install.sh','utf8');
-const fn = source.match(/prepare_artak_community_lists\(\) \{[\s\S]*?\n\}/)[0];
+const fn = source.match(/prepare_artak_community_lists\(\) \{[\s\S]*?\n\}/)[0].replace('[ -f /etc/config/forkop ] || return 0', ':');
 const shell = process.env.ARTAK_TEST_SH || (process.platform === 'win32' ? path.resolve(path.dirname(cp.execFileSync('where.exe',['git'],{encoding:'utf8'}).trim().split(/\r?\n/)[0]), '../usr/bin/sh.exe') : '/bin/sh');
 const script = `PATH=/usr/bin:/bin; export PATH
 TMP_DIR=$(mktemp -d); trap 'rm -rf "$TMP_DIR"' EXIT
 command_exists() { return 0; }
 fail() { echo "FAIL: $*"; exit 1; }
-uci() { if [ "$2" = show ]; then printf "forkop.a.community_lists='youtube telegram meta'\\nforkop.b.community_lists='discord telegram'\\n"; else case "$3" in forkop.a.community_lists) echo 'youtube telegram meta' ;; *) echo 'discord telegram' ;; esac; fi; }
+install_json_ucode() { [ "$1" = artak-community-lists ] || return 1; printf 'youtube telegram meta\ndiscord telegram\n'; }
 download_with_retry() { printf domain > "$2"; }
 ${fn}
 prepare_artak_community_lists
