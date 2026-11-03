@@ -1902,6 +1902,12 @@ check_artak_free_space() {
     [ "$space_root" -ge 65536 ] || fail "At least 64 MiB free on persistent storage is required for backup and Xray"
 }
 
+check_artak_uci_clean() {
+    command_exists uci || fail "UCI is required to check pending changes"
+    artak_uci_changes="$(uci changes 2>/dev/null)" || fail "Unable to check pending UCI changes"
+    [ -z "$artak_uci_changes" ] || fail "Apply or discard pending LuCI changes before installation"
+}
+
 download_artak_srs() {
     case "$(uname -m)" in
         aarch64|arm64) ;;
@@ -2113,6 +2119,7 @@ main() {
     sync_time
     check_system
     check_artak_free_space
+    check_artak_uci_clean
 
     detect_legacy_installation
     decide_i18n_installation
