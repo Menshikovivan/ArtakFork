@@ -2022,11 +2022,14 @@ backup_artak_configuration() {
     (umask 077; mkdir -p "$backup_dir") || fail "Failed to create backup directory"
     chmod 0700 "$backup_dir" || fail "Failed to protect backup directory"
     backup_file="$backup_dir/pre-artakfork-$(date +%Y%m%d-%H%M%S)-$$.tar.gz"
-    if [ -d /etc/forkop ]; then
-        (umask 077; tar -C / -czf "$backup_file" etc/config/forkop etc/forkop) || fail "Failed to back up Forkop configuration"
-    else
-        (umask 077; tar -C / -czf "$backup_file" etc/config/forkop) || fail "Failed to back up Forkop configuration"
-    fi
+    set -- etc/config/forkop
+    for backup_path in etc/forkop etc/config/dhcp etc/config/firewall \
+        etc/init.d/sing-box usr/bin/sing-box usr/bin/xrust usr/lib/rust-x usr/lib/libcronet.so; do
+        if [ -e "/$backup_path" ] || [ -L "/$backup_path" ]; then
+            set -- "$@" "$backup_path"
+        fi
+    done
+    (umask 077; tar -C / -czf "$backup_file" "$@") || fail "Failed to back up Forkop configuration and runtime"
     tar -tzf "$backup_file" >/dev/null || fail "Forkop configuration backup could not be verified"
     msg "Forkop configuration backup: $backup_file"
 }
