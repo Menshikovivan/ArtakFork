@@ -1443,6 +1443,13 @@ function community_matchers(name) {
         }
     }
 
+    // These service lists require domain matches as well as any IP subnets.
+    // Otherwise a partial subnet cache could silently drop domain traffic.
+    if ((name == "youtube" || name == "telegram" || name == "meta" || name == "discord") &&
+        length(domains) == 0) {
+        log_message("missing domain data for Xray community list: " + name, "warn");
+        return empty_matchers();
+    }
     if (length(domains) > 0 || length(ips) > 0)
         return { domains, ips, ok: true };
     return empty_matchers();
