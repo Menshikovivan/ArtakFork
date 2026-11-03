@@ -1942,7 +1942,12 @@ install_artak_srs() {
 prepare_artak_xray() {
     XRAY_STAGED=""
     if [ -x /usr/bin/xray ]; then
-        /usr/bin/xray version >/dev/null 2>&1 || fail "Existing Xray cannot run on this router"
+        xray_version_output="$(/usr/bin/xray version 2>/dev/null)" || fail "Existing Xray cannot run on this router"
+        xray_version_line="$(printf '%s\n' "$xray_version_output" | head -n 1)"
+        case "$xray_version_line" in
+            'Xray 26.10.31 '*|'Xray 26.10.31') ;;
+            *) fail "Existing Xray is not the tested version 26.10.31; upgrade it separately before installing" ;;
+        esac
         return 0
     fi
     command_exists unzip || fail "unzip is required to prepare Xray"
