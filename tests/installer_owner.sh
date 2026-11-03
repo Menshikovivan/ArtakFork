@@ -32,8 +32,8 @@ fail() {
 
 [ -r "$INSTALLER" ] || fail "install.sh is missing"
 
-grep -Fq 'trap cleanup EXIT' "$INSTALLER" ||
-  fail "installer cleanup must run on every exit"
+grep -Fq 'trap installer_exit EXIT' "$INSTALLER" ||
+  fail "installer transaction handler must run on every exit"
 for signal_status in "HUP 129" "INT 130" "TERM 143"; do
   set -- $signal_status
   grep -Fq "trap 'exit $2' $1" "$INSTALLER" ||

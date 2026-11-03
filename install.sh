@@ -14,6 +14,11 @@ FETCHER=""
 TMP_DIR=""
 FORKOP_WAS_ENABLED=0
 FORKOP_WAS_RUNNING=0
+ARTAK_TXN_ARMED=0
+ARTAK_ROLLBACK_READY=0
+ARTAK_PREVIOUS_RUNNING=0
+ARTAK_PREVIOUS_ENABLED=0
+ARTAK_XRAY_NEW=0
 FORKOP_LEGACY_DETECTED=0
 FORKOP_I18N_REQUESTED=0
 INSTALLER_LANG="en"
@@ -83,6 +88,20 @@ parse_args() {
 
 cleanup() {
     [ -n "$TMP_DIR" ] && rm -rf "$TMP_DIR"
+}
+
+installer_exit() {
+    artak_exit_status="$?"
+    trap - EXIT HUP INT TERM
+    if [ "$artak_exit_status" -ne 0 ] && [ "$ARTAK_TXN_ARMED" -eq 1 ]; then
+        if restore_artak_previous; then
+            warn "Previous Forkop packages and backup were restored; verify service and network."
+        else
+            warn "Automatic restoration failed. Backup remains at: $backup_file"
+        fi
+    fi
+    cleanup
+    exit "$artak_exit_status"
 }
 
 read_openwrt_release_value() {
@@ -2048,6 +2067,7 @@ EOF
         cp "$TMP_DIR/xray-init" /etc/init.d/.artak-xray.new || fail "Failed to stage Xray service"
         chmod 0755 /etc/init.d/.artak-xray.new || fail "Failed to set Xray service permissions"
         mv /etc/init.d/.artak-xray.new /etc/init.d/xray || fail "Failed to install Xray service"
+        ARTAK_XRAY_NEW=1
     fi
 }
 
@@ -2067,6 +2087,69 @@ backup_artak_configuration() {
     (umask 077; tar -C / -czf "$backup_file" "$@") || fail "Failed to back up Forkop configuration and runtime"
     tar -tzf "$backup_file" >/dev/null || fail "Forkop configuration backup could not be verified"
     msg "Forkop configuration backup: $backup_file"
+}
+
+verify_artak_rollback_packages() {
+    rollback_verify_dir="$1"
+    printf '%s  %s\n' '421af250b0680403af8e95e70dc35ed8109b7cd65e055763738027c1c33447ec' "$rollback_verify_dir/forkop.apk" | sha256sum -c - >/dev/null 2>&1 || return 1
+    printf '%s  %s\n' '877b98418c3e342ebe65448df89216dc274635939f652816b837484bdd39cd54' "$rollback_verify_dir/luci.apk" | sha256sum -c - >/dev/null 2>&1 || return 1
+    printf '%s  %s\n' '2ef1da8ae17baee80b8eacbdb58453555fb5182172bf381fbf3aa81c790bc40a' "$rollback_verify_dir/ru.apk" | sha256sum -c - >/dev/null 2>&1 || return 1
+}
+
+prepare_artak_rollback() {
+    [ "$FORKOP_LEGACY_DETECTED" -eq 0 ] || fail "Automatic rollback for legacy installations is not available"
+    pkg_is_installed forkop || return 0
+    [ "$PKG_IS_APK" -eq 1 ] || fail "Automatic rollback is currently available only on APK systems"
+    apk info -v | grep -Fxq 'forkop-2.6.5' || fail "Automatic rollback currently supports the verified Forkop X 2.6.5 installation only"
+    apk info -v | grep -Fxq 'luci-app-forkop-2.6.5' || fail "The installed LuCI version is not supported for automatic rollback"
+    apk info -v | grep -Fxq 'luci-i18n-forkop-ru-2.6.5' || fail "The installed translation version is not supported for automatic rollback"
+    if apk info -v | grep '^luci-i18n-forkop-' | grep -vFx 'luci-i18n-forkop-ru-2.6.5' | grep -q .; then
+        fail "Automatic rollback cannot preserve additional Forkop translations"
+    fi
+    for rollback_conflict in https-dns-proxy luci-app-https-dns-proxy; do
+        if pkg_is_installed "$rollback_conflict"; then
+            fail "Automatic rollback cannot preserve conflicting package: $rollback_conflict"
+        fi
+    done
+    if apk info -v | grep -q '^luci-i18n-https-dns-proxy-'; then
+        fail "Automatic rollback cannot preserve the https-dns-proxy translation packages"
+    fi
+    rollback_dir=/root/artak-test-backup
+    verify_artak_rollback_packages "$rollback_dir" || fail "Verified rollback packages are required"
+    mkdir -p "$TMP_DIR/rollback" || fail "Cannot prepare rollback packages"
+    cp "$rollback_dir/forkop.apk" "$rollback_dir/luci.apk" "$rollback_dir/ru.apk" "$TMP_DIR/rollback/" || fail "Cannot copy rollback packages"
+    verify_artak_rollback_packages "$TMP_DIR/rollback" || fail "Copied rollback package verification failed"
+    [ -s "$backup_file" ] || fail "Rollback configuration backup is missing"
+    /etc/init.d/forkop running >/dev/null 2>&1 && ARTAK_PREVIOUS_RUNNING=1
+    /etc/init.d/forkop enabled >/dev/null 2>&1 && ARTAK_PREVIOUS_ENABLED=1
+    ARTAK_ROLLBACK_READY=1
+}
+
+restore_artak_previous() {
+    [ "$ARTAK_ROLLBACK_READY" -eq 1 ] || return 1
+    rollback_ok=1
+    if [ -x /etc/init.d/forkop ]; then
+        /etc/init.d/forkop stop >/dev/null 2>&1 || rollback_ok=0
+    fi
+    if [ "$ARTAK_XRAY_NEW" -eq 1 ]; then
+        /etc/init.d/xray stop >/dev/null 2>&1 || rollback_ok=0
+    fi
+    apk add --allow-untrusted "$TMP_DIR/rollback/forkop.apk" "$TMP_DIR/rollback/luci.apk" "$TMP_DIR/rollback/ru.apk" </dev/null || rollback_ok=0
+    apk info -v | grep -Fxq 'forkop-2.6.5' || rollback_ok=0
+    apk info -v | grep -Fxq 'luci-app-forkop-2.6.5' || rollback_ok=0
+    apk info -v | grep -Fxq 'luci-i18n-forkop-ru-2.6.5' || rollback_ok=0
+    tar -xzf "$backup_file" -C / || rollback_ok=0
+    if [ "$ARTAK_PREVIOUS_ENABLED" -eq 1 ]; then
+        /etc/init.d/forkop enable >/dev/null 2>&1 || rollback_ok=0
+    else
+        /etc/init.d/forkop disable >/dev/null 2>&1 || rollback_ok=0
+    fi
+    if [ "$ARTAK_PREVIOUS_RUNNING" -eq 1 ]; then
+        /etc/init.d/forkop restart >/dev/null 2>&1 || rollback_ok=0
+    else
+        /etc/init.d/forkop stop >/dev/null 2>&1 || rollback_ok=0
+    fi
+    [ "$rollback_ok" -eq 1 ]
 }
 
 install_backend_package() {
@@ -2112,7 +2195,7 @@ post_install() {
 }
 
 main() {
-    trap cleanup EXIT
+    trap installer_exit EXIT
     trap 'exit 129' HUP
     trap 'exit 130' INT
     trap 'exit 143' TERM
@@ -2139,9 +2222,11 @@ main() {
     prepare_artak_xray
     prepare_artak_community_lists
     backup_artak_configuration
+    prepare_artak_rollback
 
     # Downloads can take minutes; recheck before the first disruptive action.
     check_artak_uci_clean
+    [ "$ARTAK_ROLLBACK_READY" -eq 0 ] || ARTAK_TXN_ARMED=1
     cleanup_legacy_installation
     install_backend_package
     migrate_legacy_configuration
@@ -2150,7 +2235,10 @@ main() {
     install_artak_srs
     install_artak_xray
     install_artak_community_lists
+    uci -q set forkop.settings.routing_engine='xray' || fail "Failed to select Xray"
+    uci -q commit forkop || fail "Failed to save Xray selection"
     post_install
+    ARTAK_TXN_ARMED=0
 
     msg "Forkop $FORKOP_PACKAGE_VERSION has been installed successfully"
     msg "Source release: ${REPO_OWNER}/${REPO_NAME}@${FORKOP_RELEASE_TAG}"
