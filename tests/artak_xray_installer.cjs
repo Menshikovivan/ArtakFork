@@ -9,7 +9,7 @@ function run(mode) {
  const script = `PATH=/usr/bin:/bin; export PATH
 TMP_DIR=$(mktemp -d); trap 'rm -rf "$TMP_DIR"' EXIT
 command_exists() { return 0; }
-chmod() { return 0; }
+chmod() { if command -v /bin/chmod >/dev/null 2>&1; then /bin/chmod "$@"; else return 0; fi; }
 fail() { echo "FAIL: $*"; exit 1; }
 download_with_retry() { printf archive > "$2"; }
 sha256sum() { if [ '${mode}' = bad ]; then printf '%064d  file\\n' 0; else echo '1811c8f1da0c3b6dc707ebaf1c8390e987ba39859a8f0a7aadd8526157f2ec8d file'; fi; }
