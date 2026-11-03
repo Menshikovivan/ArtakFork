@@ -1,8 +1,8 @@
 #!/bin/sh
 # shellcheck shell=dash
 
-REPO_OWNER="Gavr1024"
-REPO_NAME="forkop-mod"
+REPO_OWNER="Menshikovivan"
+REPO_NAME="ArtakFork"
 
 REQUIRED_SPACE_KB=1024
 CONNECT_TIMEOUT_SECONDS=15
@@ -1872,6 +1872,117 @@ download_forkop_packages() {
     fi
 }
 
+download_artak_srs() {
+    case "$(uname -m)" in
+        aarch64|arm64) ;;
+        *) fail "The Artak SRS converter is currently available only for ARM64" ;;
+    esac
+    command_exists sha256sum || fail "sha256sum is required to verify the SRS converter"
+    case "$FORKOP_RELEASE_TAG" in
+        ''|*[!0-9A-Za-z._-]*) fail "Invalid release tag for SRS converter" ;;
+    esac
+    srs_asset="artak-srs-linux-arm64"
+    srs_url="https://github.com/$REPO_OWNER/$REPO_NAME/releases/download/$FORKOP_RELEASE_TAG/$srs_asset"
+    FORKOP_SRS_FILE="$TMP_DIR/$srs_asset"
+    srs_checksum="$TMP_DIR/$srs_asset.sha256"
+    download_with_retry "$srs_url" "$FORKOP_SRS_FILE" "$srs_asset" || fail "Failed to download SRS converter"
+    download_with_retry "$srs_url.sha256" "$srs_checksum" "$srs_asset.sha256" || fail "Failed to download SRS checksum"
+    srs_expected="$(awk 'NR == 1 { print $1 }' "$srs_checksum")"
+    case "$srs_expected" in
+        *[!0-9a-fA-F]*|'') fail "Invalid SRS checksum" ;;
+    esac
+    [ "${#srs_expected}" -eq 64 ] || fail "Invalid SRS checksum length"
+    srs_actual="$(sha256sum "$FORKOP_SRS_FILE" | awk '{ print $1 }')"
+    [ "$srs_actual" = "$srs_expected" ] || fail "SRS converter checksum mismatch"
+}
+
+install_artak_srs() {
+    mkdir -p /usr/libexec || fail "Failed to create converter directory"
+    cp "$FORKOP_SRS_FILE" /usr/libexec/.artak-srs.new || fail "Failed to stage SRS converter"
+    chmod 0755 /usr/libexec/.artak-srs.new || fail "Failed to set SRS converter permissions"
+    mv -f /usr/libexec/.artak-srs.new /usr/libexec/artak-srs || fail "Failed to install SRS converter"
+}
+
+prepare_artak_xray() {
+    XRAY_STAGED=""
+    if [ -x /usr/bin/xray ]; then
+        /usr/bin/xray version >/dev/null 2>&1 || fail "Existing Xray cannot run on this router"
+        return 0
+    fi
+    command_exists unzip || fail "unzip is required to prepare Xray"
+    command_exists sha256sum || fail "sha256sum is required to verify Xray"
+    xray_archive="$TMP_DIR/Xray-linux-arm64-v8a.zip"
+    xray_url="https://github.com/XTLS/Xray-core/releases/download/v26.10.31/Xray-linux-arm64-v8a.zip"
+    xray_expected="1811c8f1da0c3b6dc707ebaf1c8390e987ba39859a8f0a7aadd8526157f2ec8d"
+    download_with_retry "$xray_url" "$xray_archive" "Xray-core v26.10.31" || fail "Failed to download Xray"
+    xray_actual="$(sha256sum "$xray_archive" | awk '{ print $1 }')"
+    [ "$xray_actual" = "$xray_expected" ] || fail "Xray archive checksum mismatch"
+    XRAY_STAGED="$TMP_DIR/xray"
+    unzip -p "$xray_archive" xray > "$XRAY_STAGED" || fail "Failed to extract Xray"
+    [ -s "$XRAY_STAGED" ] || fail "Xray archive contained an empty executable"
+    chmod 0755 "$XRAY_STAGED" || fail "Failed to prepare Xray executable"
+    "$XRAY_STAGED" version >/dev/null 2>&1 || fail "Downloaded Xray cannot run on this router"
+    for xray_geo in geoip.dat geosite.dat; do
+        unzip -p "$xray_archive" "$xray_geo" > "$TMP_DIR/$xray_geo" || fail "Failed to extract Xray data: $xray_geo"
+        [ -s "$TMP_DIR/$xray_geo" ] || fail "Xray data is empty: $xray_geo"
+    done
+}
+
+install_artak_xray() {
+    if [ -n "$XRAY_STAGED" ]; then
+        [ ! -e /usr/bin/xray ] || fail "Xray appeared during installation; refusing to overwrite it"
+        mkdir -p /usr/share/xray /etc/xray || fail "Failed to create Xray directories"
+        for xray_geo in geoip.dat geosite.dat; do
+            if [ ! -e "/usr/share/xray/$xray_geo" ]; then
+                cp "$TMP_DIR/$xray_geo" "/usr/share/xray/$xray_geo" || fail "Failed to install Xray data"
+            fi
+        done
+        cp "$XRAY_STAGED" /usr/bin/.artak-xray.new || fail "Failed to stage Xray executable"
+        chmod 0755 /usr/bin/.artak-xray.new || fail "Failed to set Xray executable permissions"
+        mv /usr/bin/.artak-xray.new /usr/bin/xray || fail "Failed to install Xray executable"
+    fi
+    if [ ! -e /etc/init.d/xray ]; then
+        cat > "$TMP_DIR/xray-init" <<'EOF'
+#!/bin/sh /etc/rc.common
+# Forkop managed xray service
+USE_PROCD=1
+START=99
+start_service() {
+    [ -x /usr/bin/xray ] && [ -f /etc/xray/config.json ] || return 1
+    procd_open_instance
+    procd_set_param env XRAY_LOCATION_ASSET="/usr/share/xray"
+    procd_set_param command /usr/bin/xray run -c /etc/xray/config.json
+    procd_set_param file /etc/xray/config.json
+    procd_set_param stderr 1
+    procd_set_param respawn
+    procd_close_instance
+}
+reload_service() {
+    stop
+    start
+}
+EOF
+        cp "$TMP_DIR/xray-init" /etc/init.d/.artak-xray.new || fail "Failed to stage Xray service"
+        chmod 0755 /etc/init.d/.artak-xray.new || fail "Failed to set Xray service permissions"
+        mv /etc/init.d/.artak-xray.new /etc/init.d/xray || fail "Failed to install Xray service"
+    fi
+}
+
+backup_artak_configuration() {
+    [ -f /etc/config/forkop ] || return 0
+    backup_dir="/root/artakfork-backups"
+    (umask 077; mkdir -p "$backup_dir") || fail "Failed to create backup directory"
+    chmod 0700 "$backup_dir" || fail "Failed to protect backup directory"
+    backup_file="$backup_dir/pre-artakfork-$(date +%Y%m%d-%H%M%S)-$$.tar.gz"
+    if [ -d /etc/forkop ]; then
+        (umask 077; tar -C / -czf "$backup_file" etc/config/forkop etc/forkop) || fail "Failed to back up Forkop configuration"
+    else
+        (umask 077; tar -C / -czf "$backup_file" etc/config/forkop) || fail "Failed to back up Forkop configuration"
+    fi
+    tar -tzf "$backup_file" >/dev/null || fail "Forkop configuration backup could not be verified"
+    msg "Forkop configuration backup: $backup_file"
+}
+
 install_backend_package() {
     pkg_install_files "$FORKOP_BACKEND_FILE" || fail "forkop installation failed"
 }
@@ -1936,12 +2047,17 @@ main() {
 
     resolve_forkop_release
     download_forkop_packages
+    download_artak_srs
+    prepare_artak_xray
+    backup_artak_configuration
 
     cleanup_legacy_installation
     install_backend_package
     migrate_legacy_configuration
     install_ui_packages
     install_selected_sing_box
+    install_artak_srs
+    install_artak_xray
     post_install
 
     msg "Forkop $FORKOP_PACKAGE_VERSION has been installed successfully"

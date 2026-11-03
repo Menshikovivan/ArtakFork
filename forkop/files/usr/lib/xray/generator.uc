@@ -1182,6 +1182,18 @@ function section_has_unmapped_domain_list(section) {
     return section_converted_lists(section).unmapped;
 }
 
+function validate_xray_rule_lists() {
+    for (let section in enabled_sections_any()) {
+        let action = option(section, "action", "");
+        if (action != "dns" && action != "bypass" && action != "block" &&
+            !connections.is_connections_action(action))
+            continue;
+        if (section_has_unmapped_domain_list(section))
+            generate_fail("Xray cannot load one or more rule lists in section '" +
+                option(section, ".name", "unknown") + "'; check the list cache and SRS converter. Aborted.");
+    }
+}
+
 function usable_xray_matchers(values) {
     let result = [];
     for (let value in array_or_empty(values))
@@ -2298,17 +2310,11 @@ function apply_section_resolved_pins(config) {
 
 function apply_primary_tproxy_routes(config, xray_sections) {
     apply_section_resolved_pins(config);
-    for (let section in enabled_sections_any())
-        apply_section_tproxy_matchers(config, section, section_policy_tproxy_target(section));
-
-    let sections = enabled_connection_sections();
-    if (length(sections) == 0)
-        sections = array_or_empty(xray_sections);
-    for (let section in sections) {
-        let name = option(section, ".name", "");
-        if (name == "")
-            continue;
-        apply_section_tproxy_matchers(config, section, section_tproxy_target(config, section));
+    for (let section in enabled_sections_any()) {
+        let target = section_policy_tproxy_target(section);
+        if (target == null && connections.is_connections_action(option(section, "action", "")))
+            target = section_tproxy_target(config, section);
+        apply_section_tproxy_matchers(config, section, target);
     }
 
     push(config.routing.rules, {
@@ -2318,13 +2324,11 @@ function apply_primary_tproxy_routes(config, xray_sections) {
         outboundTag: xray_constants.BLACKHOLE_TAG
     });
 
-    for (let section in enabled_sections_any())
-        apply_section_tproxy_sources(config, section, section_policy_tproxy_target(section));
-    for (let section in sections) {
-        let name = option(section, ".name", "");
-        if (name == "")
-            continue;
-        apply_section_tproxy_sources(config, section, section_tproxy_target(config, section));
+    for (let section in enabled_sections_any()) {
+        let target = section_policy_tproxy_target(section);
+        if (target == null && connections.is_connections_action(option(section, "action", "")))
+            target = section_tproxy_target(config, section);
+        apply_section_tproxy_sources(config, section, target);
     }
     push(config.routing.rules, {
         type: "field",
@@ -2853,6 +2857,9 @@ function generate_config(output_path, ports_path) {
     let taken = {};
     taken[xray_constants.FREEDOM_TAG] = true;
     taken[xray_constants.BLACKHOLE_TAG] = true;
+
+    if (engine.is_xray_primary())
+        validate_xray_rule_lists();
 
     if (engine.is_xray_primary())
         apply_primary_plane(config, taken);

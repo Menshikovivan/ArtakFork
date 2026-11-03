@@ -213,6 +213,33 @@ function apply_transport(stream, transport) {
         };
         if (as_string(transport.host || "") != "")
             xhttp.host = first_string(transport.host);
+        for (let mapping in [
+            [ "x_padding_bytes", "xPaddingBytes" ],
+            [ "x_padding_key", "xPaddingKey" ],
+            [ "x_padding_obfs_mode", "xPaddingObfsMode" ],
+            [ "no_grpc_header", "noGRPCHeader" ],
+            [ "sc_max_each_post_bytes", "scMaxEachPostBytes" ],
+            [ "sc_min_posts_interval_ms", "scMinPostsIntervalMs" ],
+            [ "sc_stream_up_server_secs", "scStreamUpServerSecs" ]
+        ]) {
+            if (transport[mapping[0]] != null)
+                xhttp[mapping[1]] = transport[mapping[0]];
+        }
+        if (type(transport.xmux) == "object") {
+            let xmux = {};
+            for (let mapping in [
+                [ "max_concurrency", "maxConcurrency" ],
+                [ "max_connections", "maxConnections" ],
+                [ "c_max_reuse_times", "cMaxReuseTimes" ],
+                [ "h_max_request_times", "hMaxRequestTimes" ],
+                [ "h_max_reusable_secs", "hMaxReusableSecs" ],
+                [ "h_keep_alive_period", "hKeepAlivePeriod" ]
+            ]) {
+                if (transport.xmux[mapping[0]] != null)
+                    xmux[mapping[1]] = transport.xmux[mapping[0]];
+            }
+            xhttp.xmux = xmux;
+        }
         stream.xhttpSettings = xhttp;
         if (names.network == "xhttp")
             delete stream.httpSettings;

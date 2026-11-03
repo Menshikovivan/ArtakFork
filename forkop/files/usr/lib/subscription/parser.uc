@@ -118,6 +118,10 @@ function xhttp_copy_known_settings(target, source) {
     for (let key in [
         "xPaddingBytes",
         "x_padding_bytes",
+        "xPaddingKey",
+        "x_padding_key",
+        "xPaddingObfsMode",
+        "x_padding_obfs_mode",
         "noGRPCHeader",
         "no_grpc_header",
         "scMaxEachPostBytes",
@@ -677,6 +681,10 @@ function add_transport(url) {
 
         let extra_settings = xhttp_extra_settings(query);
         xhttp_optional_positive_range(result, "x_padding_bytes", xhttp_setting_value(query, extra_settings, "xPaddingBytes", "x_padding_bytes"));
+        let padding_key = xhttp_setting_value(query, extra_settings, "xPaddingKey", "x_padding_key");
+        if (xhttp_value_present(padding_key))
+            result.x_padding_key = as_string(padding_key);
+        xhttp_optional_bool(result, "x_padding_obfs_mode", xhttp_setting_value(query, extra_settings, "xPaddingObfsMode", "x_padding_obfs_mode"));
         xhttp_optional_bool(result, "no_grpc_header", xhttp_setting_value(query, extra_settings, "noGRPCHeader", "no_grpc_header"));
         xhttp_optional_positive_range(result, "sc_max_each_post_bytes", xhttp_setting_value(query, extra_settings, "scMaxEachPostBytes", "sc_max_each_post_bytes"));
         xhttp_optional_range(result, "sc_min_posts_interval_ms", xhttp_setting_value(query, extra_settings, "scMinPostsIntervalMs", "sc_min_posts_interval_ms"));

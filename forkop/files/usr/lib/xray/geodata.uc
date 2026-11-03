@@ -13,8 +13,9 @@ let dropped_matcher_log = {};
 
 const CONFIG_NAME = getenv("FORKOP_CONFIG_NAME") || "forkop";
 const SING_BOX_BIN = getenv("FORKOP_SING_BOX_BIN") || "/usr/bin/sing-box";
+const ARTAK_SRS_BIN = getenv("FORKOP_SRS_CONVERTER") || "/usr/libexec/artak-srs";
 const ITDOG_RAW_BASE = "https://raw.githubusercontent.com/itdoginfo/allow-domains/main";
-const MAX_INLINE_MATCHERS = 8000;
+const MAX_INLINE_MATCHERS = 12000;
 const MAX_DECOMPILE_BYTES = 524288;
 const DECOMPILE_TIMEOUT_SECONDS = 8;
 const QUICK_FETCH_SECONDS = 20;
@@ -194,7 +195,7 @@ function log_message(message, level) {
 }
 
 function cache_dir() {
-    return xray_constants.XRAY_LIST_CACHE_DIR;
+    return getenv("FORKOP_XRAY_LIST_CACHE_DIR") || xray_constants.XRAY_LIST_CACHE_DIR;
 }
 
 function allow_domains_dat_present() {
@@ -989,22 +990,9 @@ function lst_to_matchers(path) {
     if (length(parsed.domains) + length(parsed.ips) == 0)
         return empty_matchers();
     if (length(parsed.domains) + length(parsed.ips) > MAX_INLINE_MATCHERS) {
-        log_message("truncating oversized list for Xray (" +
-            as_string(length(parsed.domains) + length(parsed.ips)) + " entries): " + path, "info");
-        let domains = [];
-        let ips = [];
-        for (let value in parsed.domains) {
-            if (length(domains) + length(ips) >= MAX_INLINE_MATCHERS)
-                break;
-            push(domains, value);
-        }
-        for (let value in parsed.ips) {
-            if (length(domains) + length(ips) >= MAX_INLINE_MATCHERS)
-                break;
-            push(ips, value);
-        }
-        parsed.domains = domains;
-        parsed.ips = ips;
+        log_message("rejecting oversized list for Xray (" +
+            as_string(length(parsed.domains) + length(parsed.ips)) + " entries): " + path, "warn");
+        return empty_matchers();
     }
     let domains = [];
     for (let value in parsed.domains) {
@@ -1036,7 +1024,7 @@ function ingest_rule_object(rule, domains, ips, seen_domains, seen_ips) {
     for (let value in array_or_empty(rule.domain))
         push_unique(domains, "full:" + value, seen_domains);
     for (let value in array_or_empty(rule.domain_suffix))
-        push_unique(domains, value, seen_domains);
+        push_unique(domains, "domain:" + value, seen_domains);
     for (let value in array_or_empty(rule.domain_keyword))
         push_unique(domains, "keyword:" + value, seen_domains);
     for (let value in array_or_empty(rule.domain_regex))
@@ -1045,12 +1033,44 @@ function ingest_rule_object(rule, domains, ips, seen_domains, seen_ips) {
         push_unique(ips, value, seen_ips);
 }
 
+function supported_source_rule(rule, envelope) {
+    if (type(rule) != "object")
+        return false;
+    let supported = {
+        domain: true, domain_suffix: true, domain_keyword: true,
+        domain_regex: true, ip_cidr: true
+    };
+    let has_domain = false;
+    let has_ip = false;
+    for (let key in keys(rule)) {
+        if (envelope && (key == "version" || key == "rules"))
+            continue;
+        if (!supported[key])
+            return false;
+        if (type(rule[key]) != "array")
+            return false;
+        if (length(rule[key]) > 0) {
+            if (key == "ip_cidr")
+                has_ip = true;
+            else
+                has_domain = true;
+        }
+    }
+    return !(has_domain && has_ip);
+}
+
 function source_json_to_matchers(value) {
     let domains = [];
     let ips = [];
     let seen_domains = {};
     let seen_ips = {};
-    value = object_or_empty(value);
+    if (!supported_source_rule(value, true))
+        return empty_matchers();
+    if (value.rules != null && type(value.rules) != "array")
+        return empty_matchers();
+    for (let rule in array_or_empty(value.rules))
+        if (!supported_source_rule(rule, false))
+            return empty_matchers();
     ingest_rule_object(value, domains, ips, seen_domains, seen_ips);
     for (let rule in array_or_empty(value.rules))
         ingest_rule_object(rule, domains, ips, seen_domains, seen_ips);
@@ -1062,7 +1082,8 @@ function source_json_to_matchers(value) {
 }
 
 function decompile_cache_path(srs_path) {
-    return cache_dir() + "/" + singbox_rulesets.hash12(srs_path) + ".xray.json";
+    // Older caches may contain rules flattened without semantic validation.
+    return cache_dir() + "/" + singbox_rulesets.hash12(srs_path) + ".xray-v2.json";
 }
 
 function command_from_args(args) {
@@ -1073,10 +1094,11 @@ function command_from_args(args) {
 }
 
 function timeout_bin() {
-    if (file_exists("/usr/bin/timeout"))
-        return "/usr/bin/timeout";
-    if (file_exists("/bin/timeout"))
-        return "/bin/timeout";
+    for (let candidate in [ "/usr/bin/timeout", "/bin/timeout" ]) {
+        if (file_exists(candidate) &&
+            system(command_from_args([ candidate, "1", "/bin/sh", "-c", ":" ]) + " >/dev/null 2>&1") == 0)
+            return candidate;
+    }
     return "";
 }
 
@@ -1089,8 +1111,6 @@ function decompile_srs(srs_path) {
         log_message("skip Xray decompile of oversized ruleset (" + size + " bytes): " + srs_path, "info");
         return empty_matchers();
     }
-    if (!file_exists(SING_BOX_BIN))
-        return empty_matchers();
     if (!ensure_dir(cache_dir()))
         return empty_matchers();
 
@@ -1105,16 +1125,25 @@ function decompile_srs(srs_path) {
             };
     }
 
+    // A previously converted list remains usable without a sing-box binary.
+    if (!file_exists(ARTAK_SRS_BIN) && !file_exists(SING_BOX_BIN)) {
+        log_message("cannot convert SRS ruleset for Xray without a converter or an up-to-date cache: " + srs_path, "warn");
+        return empty_matchers();
+    }
+
     let tb = timeout_bin();
     if (tb == "" && size > 131072) {
         log_message("skip Xray decompile without timeout(1) for " + srs_path, "info");
         return empty_matchers();
     }
 
-    let tmp = "/tmp/forkop-stage/" + singbox_rulesets.hash12(srs_path) + ".src." + as_string(clock()[0]);
-    if (!ensure_dir("/tmp/forkop-stage"))
+    let stage = getenv("FORKOP_XRAY_STAGE_DIR") || "/tmp/forkop-stage";
+    let tmp = stage + "/" + singbox_rulesets.hash12(srs_path) + ".src." + as_string(clock()[0]);
+    if (!ensure_dir(stage))
         return empty_matchers();
-    let args = [ SING_BOX_BIN, "rule-set", "decompile", srs_path, "-o", tmp ];
+    let args = file_exists(ARTAK_SRS_BIN)
+        ? [ ARTAK_SRS_BIN, srs_path, tmp ]
+        : [ SING_BOX_BIN, "rule-set", "decompile", srs_path, "-o", tmp ];
     let command = command_from_args(args) + " >/dev/null 2>&1";
     if (tb != "")
         command = command_from_args([ tb, as_string(DECOMPILE_TIMEOUT_SECONDS) ]) + " " + command;

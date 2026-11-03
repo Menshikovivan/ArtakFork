@@ -496,6 +496,14 @@ function ports_listening() {
     return configured_ports_listening();
 }
 
+function usable_timeout() {
+    for (let candidate in [ "/usr/bin/timeout", "/bin/timeout" ])
+        if (file_exists(candidate) &&
+            command_success_from_args([ candidate, "1", "/bin/sh", "-c", ":" ]))
+            return candidate;
+    return "";
+}
+
 function check_config(path) {
     path = as_string(path || xray_constants.XRAY_CONFIG);
     if (!xray_installed())
@@ -504,10 +512,9 @@ function check_config(path) {
         return { status: 1, reason: "xray config is missing" };
     let output = "/tmp/xray-check." + as_string(clock()[0]);
     let test_cmd = command_from_args([ xray_constants.XRAY_BIN, "run", "-test", "-c", path ]);
-    if (file_exists("/usr/bin/timeout"))
-        test_cmd = command_from_args([ "/usr/bin/timeout", "20" ]) + " " + test_cmd;
-    else if (file_exists("/bin/timeout"))
-        test_cmd = command_from_args([ "/bin/timeout", "20" ]) + " " + test_cmd;
+    let timeout = usable_timeout();
+    if (timeout != "")
+        test_cmd = command_from_args([ timeout, "20" ]) + " " + test_cmd;
     test_cmd = "XRAY_LOCATION_ASSET=" + shell_quote(xray_constants.XRAY_LOCATION_ASSET) + " " + test_cmd;
     let status = command_status(test_cmd + " >" + shell_quote(output) + " 2>&1");
     let reason = trim(read_file(output));

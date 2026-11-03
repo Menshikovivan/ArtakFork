@@ -64,6 +64,23 @@ jobs:
     steps:
       - uses: actions/checkout@v5.0.0
 
+      - name: Set up Go for SRS converter
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: tools/srs-converter/go.mod
+          cache-dependency-path: tools/srs-converter/go.sum
+
+      - name: Test SRS converter
+        working-directory: tools/srs-converter
+        run: go test ./...
+
+      - name: Test Xray conversion and installer guards
+        shell: bash
+        run: |
+          for test_file in tests/artak_*.cjs; do
+            node "$test_file"
+          done
+
       - name: Install build dependencies
         run: |
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
@@ -75,6 +92,17 @@ jobs:
         run: |
           VERSION="${{ needs.preparation.outputs.version }}"
           ./build.sh "$VERSION" "$PWD/filtered-bin/release"
+
+      - name: Build ARM64 SRS converter
+        working-directory: tools/srs-converter
+        env:
+          CGO_ENABLED: '0'
+          GOOS: linux
+          GOARCH: arm64
+        run: |
+          go build -trimpath -o ../../filtered-bin/release/artak-srs-linux-arm64 .
+          cd ../../filtered-bin/release
+          sha256sum artak-srs-linux-arm64 > artak-srs-linux-arm64.sha256
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4.6.2
@@ -106,7 +134,7 @@ jobs:
       - name: Release
         uses: softprops/action-gh-release@v2.4.0
         with:
-          files: ./filtered-bin/release/*.*
+          files: ./filtered-bin/release/*
           draft: false
           prerelease: false
           make_latest: true
