@@ -127,7 +127,9 @@ function prerm_cleanup(action) {
     if (!PACKAGE_TEST_MODE) {
         command_success_from_args([ INIT_PATH, "stop" ]);
         restore_dnsmasq_if_needed();
-        remove_managed_sing_box();
+        // Upgrades must retain the existing core for service continuity and rollback.
+        if (as_string(action) != "upgrade")
+            remove_managed_sing_box();
     }
     return remove_rt_tables_entry();
 }
