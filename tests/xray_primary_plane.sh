@@ -158,10 +158,9 @@ pass "Xray plane exposes connections for the monitoring tab"
 pass "Xray plane exposes Stats API for dashboard traffic"
 
 # --- P0: tproxy routes after add_section, using real outbound/balancer ---
-gen="$(cat "$XRAY_GEN")"
-printf '%s' "$gen" | grep -Fq 'function apply_primary_tproxy_routes' ||
+grep -Fq 'function apply_primary_tproxy_routes' "$XRAY_GEN" ||
   fail "missing apply_primary_tproxy_routes"
-printf '%s' "$gen" | grep -Fq 'function section_socks_route_target' ||
+grep -Fq 'function section_socks_route_target' "$XRAY_GEN" ||
   fail "tproxy must copy the SOCKS inbound target (balancer or first leaf)"
 
 awk '
