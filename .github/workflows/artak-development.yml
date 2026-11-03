@@ -1,0 +1,41 @@
+name: ArtakFork development build
+on:
+  push:
+    branches: [artak-xray-development]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify-and-build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tools/srs-converter/go.mod
+          cache-dependency-path: tools/srs-converter/go.sum
+      - name: Test converter
+        working-directory: tools/srs-converter
+        run: go test ./...
+      - name: Test routing and installer
+        run: |
+          for test_file in tests/artak_*.cjs; do node "$test_file"; done
+          sh -n install.sh
+      - name: Install build dependencies
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          sudo apt-get update
+          sudo apt-get install -y build-essential curl fakeroot file gawk git patch perl tar unzip util-linux xz-utils zstd
+      - name: Build packages without publishing a release
+        run: ./build.sh 0.0.1 "$PWD/filtered-bin/release"
+      - name: Build ARM64 SRS converter
+        working-directory: tools/srs-converter
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -o ../../filtered-bin/release/artak-srs-linux-arm64 .
+          cd ../../filtered-bin/release
+          sha256sum artak-srs-linux-arm64 > artak-srs-linux-arm64.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: artakfork-development-packages
+          path: filtered-bin/release/*
+          if-no-files-found: error
