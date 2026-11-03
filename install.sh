@@ -1890,6 +1890,18 @@ download_forkop_packages() {
     fi
 }
 
+check_artak_free_space() {
+    space_tmp="$(df -Pk /tmp 2>/dev/null | awk 'NR == 2 { print $4 }')"
+    space_root_path=/
+    [ -d /overlay ] && space_root_path=/overlay
+    space_root="$(df -Pk "$space_root_path" 2>/dev/null | awk 'NR == 2 { print $4 }')"
+    case "$space_tmp:$space_root" in
+        *[!0-9:]*|:*|*:) fail "Cannot determine free space for installation" ;;
+    esac
+    [ "$space_tmp" -ge 102400 ] || fail "At least 100 MiB free in /tmp is required to stage Xray and packages"
+    [ "$space_root" -ge 65536 ] || fail "At least 64 MiB free on persistent storage is required for backup and Xray"
+}
+
 download_artak_srs() {
     case "$(uname -m)" in
         aarch64|arm64) ;;
@@ -2100,6 +2112,7 @@ main() {
     detect_fetcher
     sync_time
     check_system
+    check_artak_free_space
 
     detect_legacy_installation
     decide_i18n_installation
