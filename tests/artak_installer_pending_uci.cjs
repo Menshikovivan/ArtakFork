@@ -8,5 +8,5 @@ ${fn}
 check_artak_uci_clean
 echo PASS`],{encoding:'utf8'});}
 assert.strictEqual(run('clean').status,0);const bad=run('pending');assert.notStrictEqual(bad.status,0);assert(!bad.stdout.includes('secret=value'));assert.notStrictEqual(run('error').status,0);
-const main=src.slice(src.indexOf('main() {'));assert(main.indexOf('check_artak_uci_clean')<main.indexOf('cleanup_legacy_installation'));
+const main=src.slice(src.indexOf('main() {'));assert(main.indexOf('check_artak_uci_clean')<main.indexOf('cleanup_legacy_installation')); assert(main.lastIndexOf('check_artak_uci_clean')>main.indexOf('backup_artak_configuration')); assert(main.lastIndexOf('check_artak_uci_clean')<main.indexOf('cleanup_legacy_installation'));
 console.log('Pending UCI changes block upgrade without exposing values: PASS');

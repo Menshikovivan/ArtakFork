@@ -2140,6 +2140,8 @@ main() {
     prepare_artak_community_lists
     backup_artak_configuration
 
+    # Downloads can take minutes; recheck before the first disruptive action.
+    check_artak_uci_clean
     cleanup_legacy_installation
     install_backend_package
     migrate_legacy_configuration
