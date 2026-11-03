@@ -1223,6 +1223,18 @@ function installer_post_install() {
             warn("Failed to start Forkop after upgrade.\n");
             return false;
         }
+        let running = false;
+        for (let attempt = 0; attempt < 90; attempt++) {
+            if (run_args([ INSTALLER_FORKOP_INIT, "running" ])) {
+                running = true;
+                break;
+            }
+            system("sleep 1");
+        }
+        if (!running) {
+            warn("Forkop did not reach running state after upgrade.\n");
+            return false;
+        }
     }
 
     return true;
