@@ -1213,10 +1213,16 @@ function installer_post_install() {
     if (env("FORKOP_WAS_ENABLED", "0") == "1" && path_executable(INSTALLER_FORKOP_INIT))
         run_args([ INSTALLER_FORKOP_INIT, "enable" ]);
 
-    if (env("FORKOP_WAS_RUNNING", "0") == "1" && path_executable(INSTALLER_FORKOP_INIT)) {
+    if (env("FORKOP_WAS_RUNNING", "0") == "1") {
+        if (!path_executable(INSTALLER_FORKOP_INIT)) {
+            warn("Forkop service is missing after upgrade.\n");
+            return false;
+        }
         if (!run_args([ INSTALLER_FORKOP_INIT, "start" ]) &&
-            !run_args([ INSTALLER_FORKOP_INIT, "restart" ]))
+            !run_args([ INSTALLER_FORKOP_INIT, "restart" ])) {
             warn("Failed to start Forkop after upgrade.\n");
+            return false;
+        }
     }
 
     return true;
