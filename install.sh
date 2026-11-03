@@ -1928,6 +1928,48 @@ prepare_artak_xray() {
     done
 }
 
+prepare_artak_community_lists() {
+    command_exists uci || return 0
+    community_keys="$(uci -q show forkop 2>/dev/null | cut -d= -f1 | grep '\.community_lists$' || true)"
+    prepared_names=" "
+    for community_key in $community_keys; do
+        community_values="$(uci -q get "$community_key" 2>/dev/null || true)"
+        for community_name in $community_values; do
+            case "$community_name" in youtube|telegram|meta|discord) ;; *) continue ;; esac
+            case "$prepared_names" in *" $community_name "*) continue ;; esac
+            prepared_names="$prepared_names$community_name "
+            for list_kind in Services Subnets/IPv4 Subnets/IPv6; do
+                if [ "$community_name" = youtube ] && [ "$list_kind" != Services ]; then
+                    continue
+                fi
+                list_dir="$TMP_DIR/xray-lists/$list_kind"
+                mkdir -p "$list_dir" || fail "Failed to stage Xray community lists"
+                list_file="$list_dir/$community_name.lst"
+                list_url="https://raw.githubusercontent.com/itdoginfo/allow-domains/main/$list_kind/$community_name.lst"
+                download_with_retry "$list_url" "$list_file" "$community_name $list_kind" ||
+                    fail "Failed to prepare required Xray list $community_name ($list_kind)"
+            done
+        done
+    done
+}
+
+install_artak_community_lists() {
+    for list_kind in Services Subnets/IPv4 Subnets/IPv6; do
+        case "$list_kind" in
+            Services) list_destination=/etc/forkop/list-cache/xray/Services ;;
+            *) list_destination="/etc/forkop/list-cache/$list_kind" ;;
+        esac
+        for list_file in "$TMP_DIR/xray-lists/$list_kind/"*.lst; do
+            [ -f "$list_file" ] || continue
+            mkdir -p "$list_destination" || fail "Failed to create Xray list cache"
+            list_target="$list_destination/$(basename "$list_file")"
+            if [ ! -s "$list_target" ]; then
+                cp "$list_file" "$list_target" || fail "Failed to install Xray list cache"
+            fi
+        done
+    done
+}
+
 install_artak_xray() {
     if [ -n "$XRAY_STAGED" ]; then
         [ ! -e /usr/bin/xray ] || fail "Xray appeared during installation; refusing to overwrite it"
@@ -2049,6 +2091,7 @@ main() {
     download_forkop_packages
     download_artak_srs
     prepare_artak_xray
+    prepare_artak_community_lists
     backup_artak_configuration
 
     cleanup_legacy_installation
@@ -2058,6 +2101,7 @@ main() {
     install_selected_sing_box
     install_artak_srs
     install_artak_xray
+    install_artak_community_lists
     post_install
 
     msg "Forkop $FORKOP_PACKAGE_VERSION has been installed successfully"
