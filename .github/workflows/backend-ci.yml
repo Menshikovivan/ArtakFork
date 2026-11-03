@@ -12,7 +12,9 @@ on:
   push:
     branches:
       - main
+      - artak-xray-development
     paths:
+      - 'install.sh'
       - 'forkop/files/**'
       - 'forkop/Makefile'
       - 'build.sh'

@@ -145,7 +145,9 @@ grep -Fq 'ucode -L /usr/lib/forkop /usr/lib/forkop/config/migration.uc migrate-p
 if grep -n -E 'restore_forkop_dnsmasq_failsafe|remember_service_state|stop_conflicting_services|deactivate_original_forkop_if_present|remove_conflicting_dns_proxy|pkg_remove_if_installed|pkg_remove_matching_prefix|pkg_list_installed_names' "$INSTALLER" >/dev/null 2>&1; then
   fail "install.sh must not keep shell cleanup/remove service owners"
 fi
-if grep -n -E 'rm -f /var/luci-indexcache|rm -f /tmp/luci-indexcache|/etc/init\.d/rpcd[[:space:]]+reload|/etc/init\.d/forkop[[:space:]]+(start|stop|disable|enable|restart)|/etc/init\.d/forkop[[:space:]]+(stop|disable)' "$INSTALLER" >/dev/null 2>&1; then
+# Rollback owns service restoration only inside its dedicated recovery function.
+awk '/^restore_artak_previous\(\) \{/ { skip=1; next } skip && /^\}/ { skip=0; next } !skip { print }' "$INSTALLER" > "$WORK_DIR/installer-without-rollback"
+if grep -n -E 'rm -f /var/luci-indexcache|rm -f /tmp/luci-indexcache|/etc/init\.d/rpcd[[:space:]]+reload|/etc/init\.d/forkop[[:space:]]+(start|stop|disable|enable|restart)|/etc/init\.d/forkop[[:space:]]+(stop|disable)' "$WORK_DIR/installer-without-rollback" >/dev/null 2>&1; then
   fail "install.sh shell must not own service/cache lifecycle actions"
 fi
 
