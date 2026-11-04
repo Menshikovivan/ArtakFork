@@ -44,6 +44,15 @@ jobs:
             echo "Release version must use x.y.z format, got: ${VERSION:-<empty>}" >&2
             exit 1
           fi
+          # An existing tag must point to the exact checkout used for the build.
+          if git show-ref --verify --quiet "refs/tags/$VERSION"; then
+            TAG_COMMIT=$(git rev-parse "refs/tags/$VERSION^{commit}")
+            HEAD_COMMIT=$(git rev-parse HEAD)
+            if [ "$TAG_COMMIT" != "$HEAD_COMMIT" ]; then
+              echo "Release tag $VERSION points to $TAG_COMMIT, not checkout $HEAD_COMMIT" >&2
+              exit 1
+            fi
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "commitish=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           python3 - <<'PY'
@@ -104,6 +113,21 @@ jobs:
           cd ../../filtered-bin/release
           sha256sum artak-srs-linux-arm64 > artak-srs-linux-arm64.sha256
 
+      - name: Prepare installer and checksums
+        shell: bash
+        run: |
+          VERSION="${{ needs.preparation.outputs.version }}"
+          cd ./filtered-bin/release
+          cp "$GITHUB_WORKSPACE/install.sh" artak-install.sh
+          assets=(
+            "forkop_${VERSION}.apk" "luci-app-forkop_${VERSION}.apk" "luci-i18n-forkop-ru_${VERSION}.apk"
+            "forkop_${VERSION}.ipk" "luci-app-forkop_${VERSION}.ipk" "luci-i18n-forkop-ru_${VERSION}.ipk"
+            artak-srs-linux-arm64 artak-srs-linux-arm64.sha256 artak-install.sh
+          )
+          for asset in "${assets[@]}"; do test -s "$asset" || { echo "Missing or empty release asset: $asset" >&2; exit 1; }; done
+          sha256sum "${assets[@]}" > SHA256SUMS
+          sha256sum -c SHA256SUMS
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4.6.2
         with:
@@ -136,8 +160,9 @@ jobs:
         with:
           files: ./filtered-bin/release/*
           draft: false
-          prerelease: false
-          make_latest: true
+          # This branch publishes experimental Xray builds only.
+          prerelease: true
+          make_latest: false
           name: ${{ needs.preparation.outputs.version }}
           tag_name: ${{ needs.preparation.outputs.version }}
           target_commitish: ${{ needs.preparation.outputs.commitish }}
