@@ -8,6 +8,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install test prerequisites
-        run: sudo apt-get update && sudo apt-get install -y nftables iproute2 wget
+        run: sudo apt-get update && sudo apt-get install -y nftables iproute2 wget cmake build-essential libjson-c-dev pkg-config
+      - name: Build ucode for prototype syntax checks
+        run: |
+          git clone --depth 1 --branch v0.0.20250529 https://github.com/jow-/ucode.git /tmp/ucode
+          cmake -S /tmp/ucode -B /tmp/ucode/build -DUBUS_SUPPORT=OFF -DUCI_SUPPORT=OFF -DULOOP_SUPPORT=OFF
+          cmake --build /tmp/ucode/build --parallel
+          sudo cmake --install /tmp/ucode/build
+          sudo ldconfig
+          ucode -c -o /dev/null tools/pin-fixture/apply.uc
+          ucode -c -o /dev/null tools/pin-fixture/generator.uc
+      - name: Test prototype rule builders
+        run: |
+          mkdir -p /tmp/artak-proto/forkop/files/usr/lib/nft /tmp/artak-proto/forkop/files/usr/lib/xray /tmp/artak-proto/tests
+          cp tools/pin-fixture/apply.uc /tmp/artak-proto/forkop/files/usr/lib/nft/apply.uc
+          cp tools/pin-fixture/generator.uc /tmp/artak-proto/forkop/files/usr/lib/xray/generator.uc
+          cp tools/pin-fixture/*.cjs /tmp/artak-proto/tests/
+          cd /tmp/artak-proto
+          node tests/shared-pin-prototype.cjs
+          node tests/host-derived-priority.cjs
       - name: Verify nftables behavior in isolated namespaces
         run: sudo sh tools/nft-shared-ip-netns-test.sh
