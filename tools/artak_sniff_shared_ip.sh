@@ -123,4 +123,3 @@ probe alpha.artak.invalid alpha failure && probe beta.artak.invalid beta failure
 }
 echo 'routeOnly=false: synthetic domains resolved to the non-listening IP PASS'
 echo 'HTTP sniffing test complete; TLS SNI and TPROXY remain untested.'
-
