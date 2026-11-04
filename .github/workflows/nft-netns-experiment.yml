@@ -1,0 +1,13 @@
+name: Isolated nft namespace experiment
+on:
+  push:
+    branches: [artak-nft-netns-fixture]
+jobs:
+  nft-netns:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install test prerequisites
+        run: sudo apt-get update && sudo apt-get install -y nftables iproute2 wget
+      - name: Verify nftables behavior in isolated namespaces
+        run: sudo sh tools/nft-shared-ip-netns-test.sh
