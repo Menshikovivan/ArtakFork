@@ -14,7 +14,7 @@ made_c=0
 cleanup() {
   [ "$made_c" = 0 ] || ip netns del "$nsc" >/dev/null 2>&1 || true
   [ "$made_r" = 0 ] || ip netns del "$nsr" >/dev/null 2>&1 || true
-  rm -f "$work/rules.nft" "$work/counter"
+  rm -f "$work/rules.nft" "$work/counter" "$work/batch.nft"
   rmdir "$work" 2>/dev/null || true
 }
 trap cleanup EXIT
@@ -72,5 +72,22 @@ for counter in unique_a unique_b shared subnet_shared unmarked; do
   fi
   echo "PASS: $counter"
 done
+cat >"$work/batch.nft" <<'EOF'
+add rule inet artak_shared_test check counter comment "artak-batch-rollback-probe"
+add rule inet artak_shared_test check ip daddr @missing_set counter
+EOF
+if ip netns exec "$nsr" nft -f "$work/batch.nft" >/dev/null 2>&1; then
+  echo 'FAIL: invalid nft batch unexpectedly succeeded'; exit 1
+fi
+if ip netns exec "$nsr" nft list chain inet artak_shared_test check | grep -Fq 'artak-batch-rollback-probe'; then
+  echo 'FAIL: nft applied part of rejected batch'; exit 1
+fi
+echo 'PASS: invalid nft batch left no partial rule'
+echo 'add rule inet artak_shared_test check counter comment "artak-batch-success-probe"' >"$work/batch.nft"
+ip netns exec "$nsr" nft -f "$work/batch.nft"
+ip netns exec "$nsr" nft list chain inet artak_shared_test check | grep -Fq 'artak-batch-success-probe' || {
+  echo 'FAIL: valid nft batch was not applied'; exit 1;
+}
+echo 'PASS: valid nft batch applied'
 echo 'PASS: isolated nft shared-IP set and mark experiment'
 echo 'NOTE: this tests nft set logic, not Xray sniffing, IPv6 or live pinning.'
