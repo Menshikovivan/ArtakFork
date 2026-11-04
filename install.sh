@@ -393,8 +393,7 @@ function uci_load(package_name) {
         return false;
 
     try {
-        c.load(as_string(package_name));
-        return true;
+        return c.load(as_string(package_name)) == true;
     }
     catch (e) {
         return false;
@@ -466,7 +465,7 @@ function uci_set(path, value) {
         return false;
 
     try {
-        return c.set(parts.package, parts.section, parts.option, type(value) == "array" ? value : as_string(value)) != false;
+        return c.set(parts.package, parts.section, parts.option, type(value) == "array" ? value : as_string(value)) == true;
     }
     catch (e) {
         return false;
@@ -527,7 +526,7 @@ function uci_commit(package_name) {
         return false;
 
     try {
-        return c.commit(package_name) != false;
+        return c.commit(package_name) == true;
     }
     catch (e) {
         return false;
@@ -1449,10 +1448,12 @@ else if (mode == "artak-community-lists") {
     if (c == null || !uci_load("forkop"))
         exit(1);
     try {
-        c.foreach("forkop", "section", function(section) {
+        let result = c.foreach("forkop", "section", function(section) {
             for (let item in uci_value_to_list(section.community_lists))
                 print(as_string(item), "\n");
         });
+        if (result == null)
+            exit(1);
     }
     catch (e) { exit(1); }
 }
@@ -2098,6 +2099,22 @@ backup_artak_configuration() {
             set -- "$@" "$backup_path"
         fi
     done
+    # Record the pre-install state of only the files Xray setup can change.
+    # Existing files are archived; absent files are removed during rollback.
+    artak_absent_file="$TMP_DIR/artak-absent-artifacts"
+    : > "$artak_absent_file" || fail "Cannot prepare Xray rollback inventory"
+    chmod 0600 "$artak_absent_file" || fail "Cannot protect Xray rollback inventory"
+    for backup_path in usr/libexec/artak-srs usr/libexec/.artak-srs.new \
+        usr/bin/xray usr/bin/.artak-xray.new etc/init.d/xray etc/init.d/.artak-xray.new \
+        etc/xray/config.json etc/xray/allow-domains.dat etc/xray/adlist.dat \
+        usr/share/xray/geoip.dat usr/share/xray/geosite.dat \
+        usr/share/xray/allow-domains.dat usr/share/xray/adlist.dat; do
+        if [ -e "/$backup_path" ] || [ -L "/$backup_path" ]; then
+            set -- "$@" "$backup_path"
+        else
+            printf '%s\n' "$backup_path" >> "$artak_absent_file" || fail "Cannot record Xray rollback inventory"
+        fi
+    done
     (umask 077; tar -C / -czf "$backup_file" "$@") || fail "Failed to back up Forkop configuration and runtime"
     tar -tzf "$backup_file" >/dev/null || fail "Forkop configuration backup could not be verified"
     msg "Forkop configuration backup: $backup_file"
@@ -2114,6 +2131,10 @@ prepare_artak_rollback() {
     [ "$FORKOP_LEGACY_DETECTED" -eq 0 ] || fail "Automatic rollback for legacy installations is not available"
     pkg_is_installed forkop || return 0
     [ "$PKG_IS_APK" -eq 1 ] || fail "Automatic rollback is currently available only on APK systems"
+    # An independently managed Xray service could be disrupted by this upgrade.
+    if [ -e /etc/init.d/xray ] || [ -L /etc/init.d/xray ]; then
+        fail "Automatic rollback cannot preserve an existing Xray service"
+    fi
     apk info -v | grep -Fxq 'forkop-2.6.5' || fail "Automatic rollback currently supports the verified Forkop X 2.6.5 installation only"
     apk info -v | grep -Fxq 'luci-app-forkop-2.6.5' || fail "The installed LuCI version is not supported for automatic rollback"
     apk info -v | grep -Fxq 'luci-i18n-forkop-ru-2.6.5' || fail "The installed translation version is not supported for automatic rollback"
@@ -2139,6 +2160,17 @@ prepare_artak_rollback() {
     ARTAK_ROLLBACK_READY=1
 }
 
+restore_artak_absent_artifacts() {
+    [ -f "$artak_absent_file" ] || return 1
+    while IFS= read -r artifact; do
+        case "$artifact" in
+            usr/libexec/artak-srs|usr/libexec/.artak-srs.new|usr/bin/xray|usr/bin/.artak-xray.new|etc/init.d/xray|etc/init.d/.artak-xray.new|etc/xray/config.json|etc/xray/allow-domains.dat|etc/xray/adlist.dat|usr/share/xray/geoip.dat|usr/share/xray/geosite.dat|usr/share/xray/allow-domains.dat|usr/share/xray/adlist.dat)
+                rm -f "/$artifact" || return 1 ;;
+            *) return 1 ;;
+        esac
+    done < "$artak_absent_file"
+}
+
 restore_artak_previous() {
     [ "$ARTAK_ROLLBACK_READY" -eq 1 ] || return 1
     rollback_ok=1
@@ -2153,6 +2185,7 @@ restore_artak_previous() {
     apk info -v | grep -Fxq 'luci-app-forkop-2.6.5' || rollback_ok=0
     apk info -v | grep -Fxq 'luci-i18n-forkop-ru-2.6.5' || rollback_ok=0
     tar -xzf "$backup_file" -C / || rollback_ok=0
+    restore_artak_absent_artifacts || rollback_ok=0
     if [ "$ARTAK_PREVIOUS_ENABLED" -eq 1 ]; then
         /etc/init.d/forkop enable >/dev/null 2>&1 || rollback_ok=0
     else
