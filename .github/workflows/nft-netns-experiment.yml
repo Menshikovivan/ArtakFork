@@ -18,14 +18,18 @@ jobs:
           sudo ldconfig
           ucode -c -o /dev/null tools/pin-fixture/apply.uc
           ucode -c -o /dev/null tools/pin-fixture/generator.uc
+          ucode -c -o /dev/null tools/pin-fixture/lifecycle.uc
       - name: Test prototype rule builders
         run: |
-          mkdir -p /tmp/artak-proto/forkop/files/usr/lib/nft /tmp/artak-proto/forkop/files/usr/lib/xray /tmp/artak-proto/tests
+          mkdir -p /tmp/artak-proto/forkop/files/usr/lib/nft /tmp/artak-proto/forkop/files/usr/lib/xray /tmp/artak-proto/forkop/files/usr/lib/service /tmp/artak-proto/tests
           cp tools/pin-fixture/apply.uc /tmp/artak-proto/forkop/files/usr/lib/nft/apply.uc
           cp tools/pin-fixture/generator.uc /tmp/artak-proto/forkop/files/usr/lib/xray/generator.uc
+          cp tools/pin-fixture/lifecycle.uc /tmp/artak-proto/forkop/files/usr/lib/service/lifecycle.uc
           cp tools/pin-fixture/*.cjs /tmp/artak-proto/tests/
           cd /tmp/artak-proto
           node tests/shared-pin-prototype.cjs
           node tests/host-derived-priority.cjs
+          node tests/lifecycle-nft-start.cjs
+          ARTAK_OUTPUT_NFT=/tmp/artak-pin-batch.nft node tests/atomic-pin-batch.cjs
       - name: Verify nftables behavior in isolated namespaces
-        run: sudo sh tools/nft-shared-ip-netns-test.sh
+        run: sudo ARTAK_PIN_BATCH=/tmp/artak-pin-batch.nft sh tools/nft-shared-ip-netns-test.sh

@@ -14,7 +14,7 @@ made_c=0
 cleanup() {
   [ "$made_c" = 0 ] || ip netns del "$nsc" >/dev/null 2>&1 || true
   [ "$made_r" = 0 ] || ip netns del "$nsr" >/dev/null 2>&1 || true
-  rm -f "$work/rules.nft" "$work/counter" "$work/batch.nft"
+  rm -f "$work/rules.nft" "$work/counter" "$work/batch.nft" "$work/pin-table.nft"
   rmdir "$work" 2>/dev/null || true
 }
 trap cleanup EXIT
@@ -89,5 +89,31 @@ ip netns exec "$nsr" nft list chain inet artak_shared_test check | grep -Fq 'art
   echo 'FAIL: valid nft batch was not applied'; exit 1;
 }
 echo 'PASS: valid nft batch applied'
+if [ -n "${ARTAK_PIN_BATCH:-}" ]; then
+  cat >"$work/pin-table.nft" <<'EOF'
+table inet forkop {
+  set lan { type ifname; elements = { "artak-r" } }
+  set forkop_rule_a_resolved { type ipv4_addr; }
+  set forkop_rule_a_resolved6 { type ipv6_addr; }
+  chain proxy { type filter hook prerouting priority -100; policy accept; }
+}
+EOF
+  ip netns exec "$nsr" nft -f "$work/pin-table.nft"
+  if ip netns exec "$nsr" nft -f "$ARTAK_PIN_BATCH" >/dev/null 2>&1; then
+    echo 'FAIL: generated pin batch accepted missing competitor set'; exit 1
+  fi
+  if ip netns exec "$nsr" nft list chain inet forkop proxy | grep -Fq tproxy; then
+    echo 'FAIL: rejected generated pin batch was partially applied'; exit 1
+  fi
+  ip netns exec "$nsr" nft add set inet forkop forkop_rule_b_resolved '{ type ipv4_addr; }'
+  ip netns exec "$nsr" nft add set inet forkop forkop_rule_b_resolved6 '{ type ipv6_addr; }'
+  ip netns exec "$nsr" nft -c -f "$ARTAK_PIN_BATCH"
+  ip netns exec "$nsr" nft -f "$ARTAK_PIN_BATCH"
+  ip netns exec "$nsr" nft list chain inet forkop proxy > "$work/counter"
+  [ "$(grep -c tproxy "$work/counter")" = 2 ] || { echo 'FAIL: expected two generated pin rules'; exit 1; }
+  first=$(grep tproxy "$work/counter" | head -1)
+  case "$first" in *ip6*) ;; *) echo 'FAIL: unexpected nft insert order'; exit 1 ;; esac
+  echo 'PASS: generated IPv4/IPv6 pin batch atomicity and insert order'
+fi
 echo 'PASS: isolated nft shared-IP set and mark experiment'
 echo 'NOTE: this tests nft set logic, not Xray sniffing, IPv6 or live pinning.'

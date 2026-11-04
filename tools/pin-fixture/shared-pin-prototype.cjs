@@ -8,22 +8,23 @@ function extract(name) {
 }
 const specs=[{name:'a',port:17020},{name:'b',port:17021}];
 const sections=[{'.name':'a'},{'.name':'b'},{'.name':'c',kind:'ip-only'}];
-function run(missing='') {
+function run(missing='', override={}) {
   const emitted=[];
   const b=new Function('engine','xray_constants','length','object_or_empty','as_string',
     'bool_option','section_needs_priority_sets','section_priority_sets','run_args_quiet',
-    'append_array','core_ip','nft_insert_rule','log_info','log_debug',
+    'append_array','core_ip','push','nft_insert_pin_batch','log_info','log_debug','match','int',
     `${extract('nft_pin_exclusions')}\n${extract('nft_install_resolved_pin_tproxies')}\nreturn nft_install_resolved_pin_tproxies;`);
-  const fn=b({is_xray_primary:()=>true}, {section_pin_specs:()=>specs,
+  const fn=b({is_xray_primary:()=>true}, {section_pin_specs:()=>override.specs || specs,
     FAKEIP_INET4_RANGE:'198.18.0.0/15',FAKEIP_INET6_RANGE:'fc00::/18'},
     v=>v.length,v=>v||{},String,()=>true,()=>true,
     s=>{const p='forkop_rule_'+s['.name'];return {resolved:p+'_resolved',resolved6:p+'_resolved6',subnets:p+'_subnets',subnets6:p+'_subnets6'};},
     args=>args.at(-1)!==missing,(a,b)=>{a.push(...b);return a;},
-    {format_ipv6_tproxy_target:(_,p)=>`[::1]:${p}`},
-    (_,chain,args)=>{emitted.push({chain,args});return true;},()=>{},()=>{});
-  fn('forkop','lan','0x04000000',sections);return emitted;
+    {format_ipv6_tproxy_target:(_,p)=>`[::1]:${p}`}, (a,v)=>a.push(v),
+    (_,commands)=>{for(const args of commands) emitted.push({chain:'proxy',args});return !override.failBatch;},()=>{},()=>{},
+    (v,re)=>String(v).match(re),v=>Number(v));
+  const ok=fn(override.table||'forkop','lan','0x04000000',sections);return {emitted,ok};
 }
-let rules=run();assert.strictEqual(rules.length,8);
+let {emitted:rules,ok}=run();assert(ok);assert.strictEqual(rules.length,8);
 for(const {args} of rules) {
   assert(args.includes('0x04000000'),'must require mark');
   const target=args.includes(':17020')||args.includes('[::1]:17020')?'a':'b';
@@ -37,6 +38,9 @@ for(const {args} of rules) {
     }
   }
 }
-rules=run('forkop_rule_c_resolved');
-assert.strictEqual(rules.length,0,'missing competitor set must skip pin');
+({emitted:rules,ok}=run('forkop_rule_c_resolved'));
+assert(!ok && rules.length===0,'missing competitor set must reject batch');
+assert(!run('',{table:'forkop;bad'}).ok,'malformed table rejected');
+assert(!run('',{specs:[{name:'a',port:'17020;drop'}]}).ok,'malformed port rejected');
+assert(!run('',{failBatch:true}).ok,'failed batch must propagate');
 console.log('PASS: mark, rival resolved and community/IP subnets, missing-set fallback');

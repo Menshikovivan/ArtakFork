@@ -1041,6 +1041,9 @@ function nft_pin_exclusions(table, name, sections, family) {
         let sets = section_priority_sets(section);
         let resolved = family == 6 ? sets.resolved6 : sets.resolved;
         let subnets = family == 6 ? sets.subnets6 : sets.subnets;
+        if (match(as_string(resolved), /^[A-Za-z_][A-Za-z0-9_]*$/) == null ||
+            match(as_string(subnets), /^[A-Za-z_][A-Za-z0-9_]*$/) == null)
+            return null;
         if (!run_args_quiet([ "nft", "list", "set", "inet", table, resolved ]) ||
             !run_args_quiet([ "nft", "list", "set", "inet", table, subnets ])) {
             log_debug("Section pin disabled: competitor sets unavailable for " + other_name);
@@ -1052,19 +1055,54 @@ function nft_pin_exclusions(table, name, sections, family) {
     return args;
 }
 
+// Build one validated nft input file so a failed insertion cannot leave a partial pin set.
+function nft_insert_pin_batch(table, commands) {
+    if (length(commands) == 0)
+        return true;
+    if (match(as_string(table), /^[A-Za-z_][A-Za-z0-9_]*$/) == null)
+        return false;
+    let lines = [];
+    for (let args in commands) {
+        let parts = [ "insert", "rule", "inet", as_string(table), "proxy" ];
+        append_array(parts, args);
+        for (let part in parts) {
+            part = as_string(part);
+            if (part != "!=" && part != "==" && part != "&" &&
+                match(part, /^[A-Za-z0-9_@.:\/\[\]-]+$/) == null) {
+                log_debug("Section pin batch rejected an invalid token");
+                return false;
+            }
+        }
+        push(lines, join(" ", parts));
+    }
+    let path = trim(command_output_from_args([ "mktemp" ]));
+    if (path == "")
+        return false;
+    let written = write_text_file(path, join("\n", lines) + "\n");
+    let applied = written && run_args_quiet([ "nft", "-f", path ]);
+    unlink_file(path);
+    return applied;
+}
+
 function nft_install_resolved_pin_tproxies(table, interface_set, mark, sections) {
     if (!engine.is_xray_primary())
         return true;
+    if (match(as_string(table), /^[A-Za-z_][A-Za-z0-9_]*$/) == null ||
+        match(as_string(interface_set), /^[A-Za-z_][A-Za-z0-9_]*$/) == null ||
+        match(as_string(mark), /^(0x[0-9A-Fa-f]+|[0-9]+)$/) == null)
+        return false;
     let specs = xray_constants.section_pin_specs();
     if (length(specs) == 0)
         return true;
+    let commands = [];
     let tproxy6 = "::1";
     for (let i = length(specs) - 1; i >= 0; i--) {
         let spec = object_or_empty(specs[i]);
         let name = as_string(spec.name || "");
         let port = as_string(spec.port || "");
-        if (name == "" || port == "")
-            continue;
+        if (match(name, /^[A-Za-z0-9_]+$/) == null || match(port, /^[0-9]+$/) == null ||
+            int(port) < 1 || int(port) > 65535)
+            return false;
         let resolved = "forkop_rule_" + name + "_resolved";
         let resolved6 = "forkop_rule_" + name + "_resolved6";
         let v6to = core_ip.format_ipv6_tproxy_target(tproxy6, port);
@@ -1076,8 +1114,8 @@ function nft_install_resolved_pin_tproxies(table, interface_set, mark, sections)
         if (exclusions4 == null || exclusions6 == null ||
             !run_args_quiet([ "nft", "list", "set", "inet", table, resolved ]) ||
             !run_args_quiet([ "nft", "list", "set", "inet", table, resolved6 ])) {
-            log_debug("Section pin disabled: required sets unavailable for " + name);
-            continue;
+            log_debug("Section pin batch disabled: required sets unavailable for " + name);
+            return false;
         }
         let v4 = [ "iifname", lan, "meta", "mark", "&", as_string(mark), "==", as_string(mark), "ip", "daddr", "@" + resolved, "ip", "daddr", "!=", fake4 ];
         let v6 = [ "iifname", lan, "meta", "mark", "&", as_string(mark), "==", as_string(mark), "ip6", "daddr", "@" + resolved6, "ip6", "daddr", "!=", fake6 ];
@@ -1087,12 +1125,14 @@ function nft_install_resolved_pin_tproxies(table, interface_set, mark, sections)
         let v4tcp = []; append_array(v4tcp, v4); append_array(v4tcp, [ "meta", "l4proto", "tcp", "tproxy", "ip", "to", ":" + port, "counter", "accept" ]);
         let v6udp = []; append_array(v6udp, v6); append_array(v6udp, [ "meta", "l4proto", "udp", "tproxy", "ip6", "to", v6to, "counter", "accept" ]);
         let v6tcp = []; append_array(v6tcp, v6); append_array(v6tcp, [ "meta", "l4proto", "tcp", "tproxy", "ip6", "to", v6to, "counter", "accept" ]);
-        let ok = nft_insert_rule(table, "proxy", v4udp) && nft_insert_rule(table, "proxy", v4tcp) &&
-            nft_insert_rule(table, "proxy", v6udp) && nft_insert_rule(table, "proxy", v6tcp);
-        if (ok)
-            log_info("Section pin: " + name + " resolved addresses stay on that section via TPROXY :" + port);
-        else
-            log_debug("Section pin skipped for " + name);
+        push(commands, v4udp);
+        push(commands, v4tcp);
+        push(commands, v6udp);
+        push(commands, v6tcp);
+    }
+    if (!nft_insert_pin_batch(table, commands)) {
+        log_debug("Section pin batch failed; no new pin rules committed");
+        return false;
     }
     return true;
 }
@@ -1106,8 +1146,7 @@ function nft_add_section_priority_rules_from_sections(sections, table, interface
         if (!nft_add_section_priority_rules(table, section, interface_set, localv4_set, localv6_set, mark, fakeip_range, fakeip6_range))
             log_debug("nftables priority rules incomplete for section " + as_string(section[".name"]));
     }
-    nft_install_resolved_pin_tproxies(table, interface_set, mark, sections);
-    return true;
+    return nft_install_resolved_pin_tproxies(table, interface_set, mark, sections);
 }
 
 function section_has_unresolved_domain_lists(section) {
@@ -2057,8 +2096,11 @@ function nft_create_full_runtime_from_uci(rt_table, table, localv4_set, common_s
         return false;
     }
     log_info("nftables runtime model is ready");
-    if (!nft_add_section_priority_rules_from_sections(uci_sections("section"), table, interface_set, localv4_set, localv6_set, fakeip_mark, fakeip_range, fakeip6_range))
+    if (!nft_add_section_priority_rules_from_sections(uci_sections("section"), table, interface_set, localv4_set, localv6_set, fakeip_mark, fakeip_range, fakeip6_range)) {
         log_debug("nftables section priority rules incomplete; FakeIP TPROXY is still active");
+        if (engine.is_xray_primary())
+            return false;
+    }
     if (!intercept) {
         if (!nft_create_provider_output_rules_from_uci(table, "zapret", zapret_bin, zapret_route_mark_base, zapret_queue_base, zapret_desync_mark, zapret_desync_mark_postnat))
             log_debug("nftables zapret output rules skipped");
