@@ -1028,7 +1028,7 @@ function nft_add_section_priority_rules(table, section, interface_set, localv4_s
     return true;
 }
 
-function nft_install_resolved_pin_tproxies(table, interface_set) {
+function nft_install_resolved_pin_tproxies(table, interface_set, mark) {
     if (!engine.is_xray_primary())
         return true;
     let specs = xray_constants.section_pin_specs();
@@ -1047,10 +1047,10 @@ function nft_install_resolved_pin_tproxies(table, interface_set) {
         let lan = "@" + as_string(interface_set);
         let fake4 = xray_constants.FAKEIP_INET4_RANGE;
         let fake6 = xray_constants.FAKEIP_INET6_RANGE;
-        let ok = nft_insert_rule(table, "proxy", [ "iifname", lan, "ip", "daddr", "@" + resolved, "ip", "daddr", "!=", fake4, "meta", "l4proto", "udp", "tproxy", "ip", "to", ":" + port, "counter", "accept" ]) &&
-            nft_insert_rule(table, "proxy", [ "iifname", lan, "ip", "daddr", "@" + resolved, "ip", "daddr", "!=", fake4, "meta", "l4proto", "tcp", "tproxy", "ip", "to", ":" + port, "counter", "accept" ]) &&
-            nft_insert_rule(table, "proxy", [ "iifname", lan, "ip6", "daddr", "@" + resolved6, "ip6", "daddr", "!=", fake6, "meta", "l4proto", "udp", "tproxy", "ip6", "to", v6to, "counter", "accept" ]) &&
-            nft_insert_rule(table, "proxy", [ "iifname", lan, "ip6", "daddr", "@" + resolved6, "ip6", "daddr", "!=", fake6, "meta", "l4proto", "tcp", "tproxy", "ip6", "to", v6to, "counter", "accept" ]);
+        let ok = nft_insert_rule(table, "proxy", [ "iifname", lan, "meta", "mark", "&", as_string(mark), "==", as_string(mark), "ip", "daddr", "@" + resolved, "ip", "daddr", "!=", fake4, "meta", "l4proto", "udp", "tproxy", "ip", "to", ":" + port, "counter", "accept" ]) &&
+            nft_insert_rule(table, "proxy", [ "iifname", lan, "meta", "mark", "&", as_string(mark), "==", as_string(mark), "ip", "daddr", "@" + resolved, "ip", "daddr", "!=", fake4, "meta", "l4proto", "tcp", "tproxy", "ip", "to", ":" + port, "counter", "accept" ]) &&
+            nft_insert_rule(table, "proxy", [ "iifname", lan, "meta", "mark", "&", as_string(mark), "==", as_string(mark), "ip6", "daddr", "@" + resolved6, "ip6", "daddr", "!=", fake6, "meta", "l4proto", "udp", "tproxy", "ip6", "to", v6to, "counter", "accept" ]) &&
+            nft_insert_rule(table, "proxy", [ "iifname", lan, "meta", "mark", "&", as_string(mark), "==", as_string(mark), "ip6", "daddr", "@" + resolved6, "ip6", "daddr", "!=", fake6, "meta", "l4proto", "tcp", "tproxy", "ip6", "to", v6to, "counter", "accept" ]);
         if (ok)
             log_info("Section pin: " + name + " resolved addresses stay on that section via TPROXY :" + port);
         else
@@ -1068,7 +1068,7 @@ function nft_add_section_priority_rules_from_sections(sections, table, interface
         if (!nft_add_section_priority_rules(table, section, interface_set, localv4_set, localv6_set, mark, fakeip_range, fakeip6_range))
             log_debug("nftables priority rules incomplete for section " + as_string(section[".name"]));
     }
-    nft_install_resolved_pin_tproxies(table, interface_set);
+    nft_install_resolved_pin_tproxies(table, interface_set, mark);
     return true;
 }
 
