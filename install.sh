@@ -26,6 +26,7 @@ SING_BOX_INSTALL_VARIANT=""
 
 FORKOP_RELEASE_JSON=""
 FORKOP_RELEASE_TAG=""
+ARTAK_REQUESTED_RELEASE_TAG=""
 FORKOP_BACKEND_URL=""
 FORKOP_BACKEND_NAME=""
 FORKOP_BACKEND_FILE=""
@@ -58,16 +59,14 @@ fail() {
 
 usage() {
     cat <<EOF
-Usage: $0
+Usage: $0 --release-tag x.y.z
 
 Installs or updates Forkop packages:
   - forkop
   - luci-app-forkop
   - luci-i18n-forkop-ru when requested or when LuCI language is Russian
 
-Can also install or switch sing-box variant:
-  - stable sing-box from OpenWrt feeds
-  - sing-box-extended from GitHub OpenWrt packages (for xHTTP support)
+Select a specific published ArtakFork Xray release, including a prerelease.
 EOF
 }
 
@@ -78,12 +77,20 @@ parse_args() {
                 usage
                 exit 0
                 ;;
+            --release-tag)
+                [ "$#" -ge 2 ] || fail "--release-tag requires a numeric x.y.z release tag"
+                [ -z "$ARTAK_REQUESTED_RELEASE_TAG" ] || fail "--release-tag may only be specified once"
+                ARTAK_REQUESTED_RELEASE_TAG="$2"
+                shift
+                ;;
             *)
                 fail "Unknown installer option: $1"
                 ;;
         esac
         shift
     done
+    printf '%s\n' "$ARTAK_REQUESTED_RELEASE_TAG" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' ||
+        fail "Specify the Xray release explicitly with --release-tag x.y.z"
 }
 
 cleanup() {
@@ -1739,24 +1746,24 @@ get_luci_main_lang() {
     install_json_ucode uci-get luci.main.lang 2>/dev/null || true
 }
 
-fetch_github_latest_release_json() {
+fetch_github_tagged_release_json() {
     owner="$1"
     repo="$2"
     response=""
     message=""
-    url="https://api.github.com/repos/${owner}/${repo}/releases/latest"
+    url="https://api.github.com/repos/${owner}/${repo}/releases/tags/${ARTAK_REQUESTED_RELEASE_TAG}"
 
     response="$(http_get "$url" 2>/dev/null || true)"
-    [ -n "$response" ] || fail "Failed to query GitHub latest release metadata for ${owner}/${repo}"
+    [ -n "$response" ] || fail "Failed to query GitHub release metadata for ${owner}/${repo}"
 
     message="$(printf '%s' "$response" | install_json_ucode github-message 2>/dev/null)" ||
-        fail "GitHub returned an invalid latest release response for ${owner}/${repo}"
+        fail "GitHub returned an invalid release response for ${owner}/${repo}"
     case "$message" in
         *"API rate limit"*|*"rate limit exceeded"*)
             fail "GitHub API rate limit reached. Try again later."
             ;;
         "Not Found")
-            fail "No published latest release found for ${owner}/${repo}"
+            fail "Requested release not found for ${owner}/${repo}"
             ;;
     esac
 
@@ -1768,9 +1775,10 @@ resolve_forkop_release() {
 
     [ "$PKG_IS_APK" -eq 1 ] && asset_ext="apk"
 
-    FORKOP_RELEASE_JSON="$(fetch_github_latest_release_json "$REPO_OWNER" "$REPO_NAME")"
+    FORKOP_RELEASE_JSON="$(fetch_github_tagged_release_json "$REPO_OWNER" "$REPO_NAME")" || fail "Failed to obtain the requested release"
     FORKOP_RELEASE_TAG="$(printf '%s' "$FORKOP_RELEASE_JSON" | install_json_ucode release-tag 2>/dev/null)"
     [ -n "$FORKOP_RELEASE_TAG" ] || fail "Failed to detect the Forkop release tag"
+    [ "$FORKOP_RELEASE_TAG" = "$ARTAK_REQUESTED_RELEASE_TAG" ] || fail "GitHub returned a different release tag"
 
     FORKOP_BACKEND_URL="$(printf '%s' "$FORKOP_RELEASE_JSON" | install_json_ucode release-asset-url backend "$asset_ext" 2>/dev/null)"
     [ -n "$FORKOP_BACKEND_URL" ] || fail "The Forkop release does not contain a forkop .$asset_ext package"
